@@ -1,4 +1,4 @@
-// SensorData.hpp - 数据结构定义
+﻿// SensorData.hpp - 数据结构定义
 #pragma once
 #include <opencv2/opencv.hpp>
 #include <vector>
@@ -15,13 +15,13 @@ struct RadarPoint {
 class SensorData {
 public:
     virtual ~SensorData() = default;
-    uint64_t timestamp;
+    int64_t timestamp;  // 使用 int64_t 存储毫秒时间戳
 };
 
 // 图像数据类
 class ImageData : public SensorData {
 public:
-    cv::Mat image;
+    cv::Mat frame;
 };
 
 // 雷达数据类
