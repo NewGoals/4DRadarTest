@@ -1,0 +1,194 @@
+#pragma once
+#include "DataReader.hpp"
+#include <cstdint>
+#include <vector>
+#include <memory>
+#include <functional>
+#include <variant>
+
+// 命令码枚举定义
+enum class CommandCode : uint8_t {
+    FACTORY_RESET       = 0x01,    // 恢复出厂设置
+    ADD_COORDINATE      = 0x03,    // 添加坐标设置
+    NETWORK_CONFIG      = 0x04,    // 更改网络设置
+    BROADCAST_NETWORK   = 0x05,    // 广播网络参数
+    HEARTBEAT_CONFIG    = 0x09,    // 心跳时间设置
+    READ_RADAR_STATUS   = 0x0A,    // 读取雷达状态
+    SYSTEM_TIME         = 0x24,    // 系统时间设置
+    SAVE_PARAMS         = 0x88,    // 保存参数
+    HEARTBEAT           = 0xA4,    // 心跳包
+    TARGET_INFO         = 0xA8,    // 目标信息传输
+    FIRMWARE_UPDATE     = 0xCC,    // 固件更新
+    FILE_TRANSFER       = 0xD7,    // 文件传输过程
+    FILE_TRANSFER_END   = 0xD8,    // 文件传输结束
+    RADAR_ANGLE_CORRECT = 0xD9,    // 雷达角度校正
+    GET_ANGLE_STATUS    = 0xDA,    // 获取雷达角度校正状态
+    SYSTEM_RESTART      = 0xDB,    // 重启系统
+    READ_PARAMS         = 0xE0,    // 参数读取
+    SET_PARAMS          = 0xE1,    // 参数设置
+    TEMP_SET_PARAMS     = 0xE3,    // 参数临时设置
+    DEVICE_DISCOVERY    = 0xFF     // 设备发现
+};
+
+
+// 解析状态枚举
+enum class ParseFrameState {
+    START,              // 起始状态，等待帧头
+    FRAME_HEADER,       // 帧头部
+    FRAME_DATA_LEN,     // 数据长度
+    FRAME_DATA,         // 数据内容
+    FRAME_CHECKSUM      // 校验和
+};
+
+
+// 协议帧头结构
+#pragma pack(push, 1)  // 确保结构体紧凑排列
+struct FrameHeader {
+    uint8_t start[2];    // 起始码 0xA5 0x5A
+    uint8_t srcAddr;     // 源地址
+    uint8_t destAddr;    // 目标地址
+    CommandCode command; // 命令码
+    uint8_t lengthLow;   // 参数长度低字节
+    uint8_t lengthHigh;  // 参数长度高字节
+};
+
+
+// 完整协议帧结构
+struct ProtocolFrame {
+    FrameHeader header;
+    std::vector<uint8_t> data;  // 可变长数据
+    uint8_t checksum;           // 校验和
+};
+#pragma pack(pop)
+
+
+// 基础命令解析类
+class CommandParse {
+public:
+    virtual ~CommandParse() = default;
+    
+    // 解析数据的纯虚函数
+    virtual bool parse(const uint8_t* data, size_t length) = 0;
+    
+    // 打印解析结果
+    virtual void print() const = 0;
+    
+    // 获取命令码（用于识别具体的命令类型）
+    virtual uint8_t getCommandCode() const = 0;
+};
+
+
+// 0xa8 命令解析类
+class TargetInfoParse_0xA8 : public CommandParse {
+public:
+    struct TargetInfo {
+        uint32_t type;
+        float x_axes;
+        float y_axes;
+        float z_axes;
+        float rangIdx;
+        float speed;
+        float peakVal;
+        float dopplerIdx;
+        float aoa_snr;
+    };
+
+    // 公共接口
+    bool parse(const uint8_t* data, size_t length) override;
+    void print() const override;
+    uint8_t getCommandCode() const override { return 0xA8; }
+
+    // 数据访问方法
+    const std::vector<TargetInfo>& getTargets() const { return targets; }
+    size_t getTargetCount() const { return targets.size(); }
+    
+    // 如果需要修改数据的接口
+    void clearTargets() { targets.clear(); }
+    void addTarget(const TargetInfo& target) { targets.push_back(target); }
+
+private:
+    std::vector<TargetInfo> targets;
+    size_t targetCount = 0;
+};
+
+
+// 定义可能的返回类型组合
+using CommandParseResult = std::variant<
+    std::monostate,  // 表示无数据
+    std::vector<TargetInfoParse_0xA8::TargetInfo>
+>;
+
+
+// 协议类
+class Protocol {
+public:
+    // 协议相关常量
+    static constexpr uint8_t FRAME_HEADER_0 = 0xA5;
+    static constexpr uint8_t FRAME_HEADER_1 = 0x5A;
+    static constexpr size_t HEADER_SIZE = sizeof(FrameHeader);
+    static constexpr size_t MIN_FRAME_SIZE = HEADER_SIZE + 1;  // 头部 + 校验和
+
+    // 计算校验和
+    static uint8_t calculateChecksum(const uint8_t* data, size_t len);
+    
+    // 打包协议帧
+    static std::vector<uint8_t> packFrame(uint8_t srcAddr, uint8_t destAddr, 
+                                        CommandCode command, const std::vector<uint8_t>& data = {});
+    
+    // 解析数据，将原始数据转为协议帧格式
+    static bool parseFrame(const uint8_t* data, size_t len, ProtocolFrame& frame);
+
+    // 命令解析函数
+    static bool parseCommandData(const ProtocolFrame& frame, CommandParseResult& result);
+};
+
+// TCP原始数据操作类
+class TcpCommandHandler {
+private:
+    TcpClient& tcpClient;        // 引用TcpClient对象   
+    ParseFrameState parseState;  // 解析状态
+    std::vector<uint8_t> parseBuffer;  // 解析缓冲区
+    size_t parseBufCount;  // 解析缓冲区计数
+    size_t expectedDataLen;  // 预期数据长度
+
+    // 添加接收缓冲区
+    static constexpr size_t RECV_BUFFER_SIZE = 40960;
+    std::vector<uint8_t> recvBuffer;
+    size_t dataStart = 0;  // 有效数据起始位置
+    size_t dataSize = 0;   // 有效数据大小
+
+public:
+    explicit TcpCommandHandler(TcpClient& client) 
+        : tcpClient(client)
+        , parseState(ParseFrameState::START)
+        , parseBufCount(0)
+        , expectedDataLen(0) {
+            recvBuffer.resize(RECV_BUFFER_SIZE);
+        }
+    
+    // 发送数据
+    bool sendFrame(uint8_t srcAddr, uint8_t destAddr, CommandCode command, 
+                  const std::vector<uint8_t>& data = {});
+    
+    // 接收并解析数据
+    bool receiveFrame(ProtocolFrame& frame);
+
+    // 添加新的便捷方法
+    bool sendCommand(CommandCode command, const std::vector<uint8_t>& data = {}) {
+        // 使用默认地址发送命令
+        return sendFrame(0x10, 0x90, command, data);
+    }
+    
+    // 添加异步接收回调支持
+    using FrameHandler = std::function<void(const ProtocolFrame&)>;
+    void setFrameHandler(FrameHandler handler) {
+        frameHandler = handler;
+    }
+
+private:
+    // 重置解析状态
+    void resetParser();
+
+    bool parseFrame(const std::vector<uint8_t>& data, ProtocolFrame& frame);
+    FrameHandler frameHandler;  // 回调函数
+};

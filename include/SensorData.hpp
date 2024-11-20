@@ -1,30 +1,30 @@
-ï»¿// SensorData.hpp - æ•°æ®ç»“æ„å®šä¹‰
+// SensorData.hpp - Êı¾İ½á¹¹¶¨Òå
 #pragma once
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <memory>
 
-// é›·è¾¾ç‚¹æ•°æ®ç»“æ„
+// À×´ïµãÊı¾İ½á¹¹
 struct RadarPoint {
     float x, y, z;
     float rcs;
     float v_r;
 };
 
-// ä¼ æ„Ÿå™¨æ•°æ®åŸºç±»
+// ´«¸ĞÆ÷Êı¾İ»ùÀà
 class SensorData {
 public:
     virtual ~SensorData() = default;
-    int64_t timestamp;  // ä½¿ç”¨ int64_t å­˜å‚¨æ¯«ç§’æ—¶é—´æˆ³
+    int64_t timestamp;  // Ê¹ÓÃ int64_t ´æ´¢ºÁÃëÊ±¼ä´Á
 };
 
-// å›¾åƒæ•°æ®ç±»
+// Í¼ÏñÊı¾İÀà
 class ImageData : public SensorData {
 public:
     cv::Mat frame;
 };
 
-// é›·è¾¾æ•°æ®ç±»
+// À×´ïÊı¾İÀà
 class RadarData : public SensorData {
 public:
     std::vector<RadarPoint> points;

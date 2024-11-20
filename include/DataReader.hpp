@@ -1,14 +1,21 @@
-ï»¿// DataReader.hpp - æ•°æ®è¯»å–æ¥å£å’Œå®ç°
+// DataReader.hpp - Êı¾İ¶ÁÈ¡½Ó¿ÚºÍÊµÏÖ
 #pragma once
 #include "SensorData.hpp"
 #include <string>
 #include <memory>
 #include <fstream>
+#include <cstddef>  // for size_t
+#ifdef _WIN32
+    #include <winsock2.h>
+    typedef long long ssize_t;
+#else
+    #include <sys/types.h>  // for ssize_t on Unix-like systems
+#endif
 
-// åœ¨å…¶ä»–ç±»å£°æ˜ä¹‹å‰æ·»åŠ å‰å‘å£°æ˜
+// ÔÚÆäËûÀàÉùÃ÷Ö®Ç°Ìí¼ÓÇ°ÏòÉùÃ÷
 class SerialPortImpl;
 
-// æ•°æ®è¯»å–æ¥å£
+// Êı¾İ¶ÁÈ¡½Ó¿Ú
 class IDataReader {
 public:
     virtual ~IDataReader() = default;
@@ -18,7 +25,7 @@ public:
     virtual bool isEnd() const = 0;
 };
 
-// æ–‡ä»¶è¯»å–å™¨åŸºç±»
+// ÎÄ¼ş¶ÁÈ¡Æ÷»ùÀà
 class FileReader : public IDataReader {
 protected:
     std::string folderPath;
@@ -31,7 +38,7 @@ public:
     bool isEnd() const override;
 };
 
-// å›¾åƒæ–‡ä»¶è¯»å–å™¨
+// Í¼ÏñÎÄ¼ş¶ÁÈ¡Æ÷
 class ImageFileReader : public FileReader {
 public:
     explicit ImageFileReader(const std::string& path) : FileReader(path) {}
@@ -39,24 +46,24 @@ public:
     std::shared_ptr<SensorData> getData() override;
 };
 
-// é›·è¾¾æ–‡ä»¶è¯»å–å™¨
+// À×´ïÎÄ¼ş¶ÁÈ¡Æ÷
 class RadarFileReader : public FileReader {
 private:
     bool saveEnabled = false;
     std::string savePath;
-    std::ofstream outFile;  // ç”¨äºä¿å­˜é›·è¾¾æ•°æ®çš„æ–‡ä»¶æµ
+    std::ofstream outFile;  // ÓÃÓÚ±£´æÀ×´ïÊı¾İµÄÎÄ¼şÁ÷
 
 public:
     explicit RadarFileReader(const std::string& path) : FileReader(path) {}
     bool readNext() override;
     std::shared_ptr<SensorData> getData() override;
     
-    // æ–°å¢ä¿å­˜ç›¸å…³æ–¹æ³•
+    // ĞÂÔö±£´æÏà¹Ø·½·¨
     bool enableSave(const std::string& outputPath);
     void disableSave();
 };
 
-// ä¸²å£è¯»å–å™¨
+// ´®¿Ú¶ÁÈ¡Æ÷
 class SerialReader : public IDataReader {
 private:
     std::string portName;
@@ -72,7 +79,7 @@ public:
     bool isEnd() const override { return false; }
 };
 
-// è§†é¢‘æµè¯»å–å™¨
+// ÊÓÆµÁ÷¶ÁÈ¡Æ÷
 class VideoStreamReader : public IDataReader {
 private:
     cv::VideoCapture cap;
@@ -93,7 +100,56 @@ public:
     bool enableSave(const std::string& outputPath, double fps = 30.0);
     void disableSave();
     virtual bool readNext() override {
-        // æ·»åŠ å…·ä½“å®ç°
-        return false;  // ä¸´æ—¶è¿”å›å€¼ï¼Œéœ€è¦æ ¹æ®å®é™…é€»è¾‘ä¿®æ”¹
+        // Ìí¼Ó¾ßÌåÊµÏÖ
+        return false;  // ÁÙÊ±·µ»ØÖµ£¬ĞèÒª¸ù¾İÊµ¼ÊÂß¼­ĞŞ¸Ä
     }
+};
+
+class TcpClient {
+private:
+    std::string serverAddress;
+    int port;
+    int sockfd;
+    bool connected;
+
+public:
+    TcpClient(const std::string& address = "192.168.10.117", int port = 50000);
+    ~TcpClient();
+    
+    bool connect();
+    bool disconnect();
+    bool isConnected() const { return connected; }
+    
+    // ¶ÁĞ´·½·¨
+    ssize_t read(uint8_t* buffer, size_t size);
+    ssize_t write(const uint8_t* data, size_t size);
+
+    bool setReceiveTimeout(int milliseconds) {
+        #ifdef _WIN32
+            DWORD timeout = milliseconds;
+            return setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, 
+                (const char*)&timeout, sizeof(timeout)) == 0;
+        #else
+            struct timeval tv;
+            tv.tv_sec = milliseconds / 1000;
+            tv.tv_usec = (milliseconds % 1000) * 1000;
+            return setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                (const char*)&tv, sizeof(tv)) == 0;
+        #endif
+    }
+    
+    int getSocket() const { return sockfd; }
+};
+
+// È»ºó´´½¨Ò»¸ö×¨ÃÅÓÃÓÚÊı¾İ¶ÁÈ¡µÄ°ü×°Àà
+class TcpDataReader : public IDataReader {
+private:
+    std::shared_ptr<TcpClient> tcpClient;
+    
+public:
+    explicit TcpDataReader(std::shared_ptr<TcpClient> client);
+    bool init() override;
+    bool readNext() override;
+    std::shared_ptr<SensorData> getData() override;
+    bool isEnd() const override { return !tcpClient->isConnected(); }
 };

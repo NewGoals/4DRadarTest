@@ -1,10 +1,10 @@
-// Visualizer.hpp - 可视化模块
+// Visualizer.hpp - 可视化模�?
 #pragma once
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/point_types.h>
 #include "SensorData.hpp"
 
-// 可视化基类
+// 可视化基�?
 class IVisualizer {
 public:
     virtual ~IVisualizer() = default;

@@ -1,18 +1,22 @@
-ï»¿#include "DataReader.hpp"
-#include <opencv2/opencv.hpp>
-#include <filesystem>
-
-// å¹³å°ç›¸å…³çš„å¤´æ–‡ä»¶
 #ifdef _WIN32
-    #include <windows.h>
+    #define WIN32_LEAN_AND_MEAN  // ±ÜÃâ°üº¬¶àÓàµÄWindowsÍ·ÎÄ¼ş
+    #include <WinSock2.h>
+    #include <WS2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
 #else
-    #include <termios.h>
-    #include <fcntl.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
     #include <unistd.h>
 #endif
 
+#include <iostream>
+#include "DataReader.hpp"
+#include <opencv2/opencv.hpp>
+#include <filesystem>
+
 //==============================================================================
-// FileReader åŸºç±»å®ç°
+// FileReader »ùÀàÊµÏÖ
 //==============================================================================
 bool FileReader::init() {
     try {
@@ -32,7 +36,7 @@ bool FileReader::isEnd() const {
 }
 
 //==============================================================================
-// ImageFileReader å®ç°
+// ImageFileReader ÊµÏÖ
 //==============================================================================
 bool ImageFileReader::readNext() {
     if (isEnd()) return false;
@@ -46,12 +50,12 @@ std::shared_ptr<SensorData> ImageFileReader::getData() {
     }
     cv::Mat image = cv::imread(fileList[currentIndex - 1]);
     auto data = std::make_shared<SensorData>();
-    // è®¾ç½®å›¾åƒæ•°æ®
+    // ÉèÖÃÍ¼ÏñÊı¾İ
     return data;
 }
 
 //==============================================================================    
-// RadarFileReader å®ç°
+// RadarFileReader ÊµÏÖ
 //==============================================================================
 bool RadarFileReader::readNext() {
     if (isEnd()) return false;
@@ -64,7 +68,7 @@ std::shared_ptr<SensorData> RadarFileReader::getData() {
         return nullptr;
     }
 
-    // æ‰“å¼€å½“å‰é›·è¾¾æ•°æ®æ–‡ä»¶
+    // ´ò¿ªµ±Ç°À×´ïÊı¾İÎÄ¼ş
     std::ifstream inFile(fileList[currentIndex - 1], std::ios::binary);
     if (!inFile) {
         return nullptr;
@@ -72,7 +76,7 @@ std::shared_ptr<SensorData> RadarFileReader::getData() {
 
     auto data = std::make_shared<RadarData>();
     
-    // è¯»å–é›·è¾¾æ•°æ®
+    // ¶ÁÈ¡À×´ïÊı¾İ
     std::vector<char> buffer;
     inFile.seekg(0, std::ios::end);
     size_t fileSize = inFile.tellg();
@@ -81,14 +85,14 @@ std::shared_ptr<SensorData> RadarFileReader::getData() {
     buffer.resize(fileSize);
     inFile.read(buffer.data(), fileSize);
     
-    // å°†äºŒè¿›åˆ¶æ•°æ®è½¬æ¢ä¸º RadarPoint ç»“æ„
+    // ½«¶ş½øÖÆÊı¾İ×ª»»Îª RadarPoint ½á¹¹
     size_t numPoints = fileSize / sizeof(RadarPoint);
     data->points.resize(numPoints);
     memcpy(data->points.data(), buffer.data(), fileSize);
     
-    // data->timestamp = /* ä»æ–‡ä»¶åæˆ–æ•°æ®ä¸­æå–æ—¶é—´æˆ³ */;
+    // data->timestamp = /* ´ÓÎÄ¼şÃû»òÊı¾İÖĞÌáÈ¡Ê±¼ä´Á */;
     
-    // å¦‚æœå¯ç”¨äº†ä¿å­˜åŠŸèƒ½ï¼Œå°†æ•°æ®å†™å…¥è¾“å‡ºæ–‡ä»¶
+    // Èç¹ûÆôÓÃÁË±£´æ¹¦ÄÜ£¬½«Êı¾İĞ´ÈëÊä³öÎÄ¼ş
     if (saveEnabled && outFile.is_open()) {
         outFile.write(reinterpret_cast<const char*>(data->points.data()), fileSize);
     }
@@ -98,7 +102,7 @@ std::shared_ptr<SensorData> RadarFileReader::getData() {
 
 bool RadarFileReader::enableSave(const std::string& outputPath) {
     if (saveEnabled) {
-        disableSave();  // å¦‚æœå·²ç»å¯ç”¨ï¼Œå…ˆå…³é—­å½“å‰æ–‡ä»¶
+        disableSave();  // Èç¹ûÒÑ¾­ÆôÓÃ£¬ÏÈ¹Ø±Õµ±Ç°ÎÄ¼ş
     }
     
     savePath = outputPath;
@@ -116,7 +120,7 @@ void RadarFileReader::disableSave() {
 }
 
 //==============================================================================
-// SerialReader è·¨å¹³å°å®ç°
+// SerialReader ¿çÆ½Ì¨ÊµÏÖ
 //==============================================================================
 class SerialPortImpl {
 public:
@@ -209,32 +213,32 @@ bool SerialReader::init() {
 }
 
 bool SerialReader::readNext() {
-    // å®ç°è¯»å–é€»è¾‘
+    // ÊµÏÖ¶ÁÈ¡Âß¼­
     return true;
 }
 
 std::shared_ptr<SensorData> SerialReader::getData() {
     auto data = std::make_shared<SensorData>();
-    // å¤„ç†æ•°æ®
+    // ´¦ÀíÊı¾İ
     return data;
 }
 
 //==============================================================================
-// VideoStreamReader å®ç°
+// VideoStreamReader ÊµÏÖ
 //==============================================================================
 bool VideoStreamReader::init() {
     if (!cap.open(streamUrl)) {
         return false;
     }
 
-    // å°è¯•è¯»å–ç¬¬ä¸€å¸§ä»¥è·å–å°ºå¯¸
+    // ³¢ÊÔ¶ÁÈ¡µÚÒ»Ö¡ÒÔ»ñÈ¡³ß´ç
     cv::Mat frame;
-    if (cap.read(frame) && frameWidth == 0 && frameHeight == 0) {
-        frameWidth = frame.cols;
-        frameHeight = frame.rows;
-    } else {
-        return false; // æ— æ³•è¯»å–è§†é¢‘æµ
-    }
+    if (cap.read(frame)) {
+        if(frameWidth == 0 && frameHeight == 0) {
+            frameWidth = frame.cols;
+            frameHeight = frame.rows;
+        }
+    } else return false;
 
     return true;
 }
@@ -242,10 +246,10 @@ bool VideoStreamReader::init() {
 bool VideoStreamReader::grabFrame() {
     if (!cap.isOpened()) return false;
     
-    // åªè·å–å¸§ï¼Œä¸è§£ç ï¼Œè¿™æ ·æ›´å¿«
+    // Ö»»ñÈ¡Ö¡£¬²»½âÂë£¬ÕâÑù¸ü¿ì
     if (!cap.grab()) return false;
     
-    // å¦‚æœéœ€è¦ä¿å­˜ï¼Œåˆ™éœ€è¦è§£ç å¹¶ä¿å­˜
+    // Èç¹ûĞèÒª±£´æ£¬ÔòĞèÒª½âÂë²¢±£´æ
     if (saveEnabled && writer.isOpened()) {
         cv::Mat frame;
         if (cap.retrieve(frame)) {
@@ -260,9 +264,9 @@ std::shared_ptr<SensorData> VideoStreamReader::getData() {
     cv::Mat frame;
     cap.retrieve(frame);
     
-    auto data = std::make_shared<ImageData>();  // å‡è®¾ ImageData æ˜¯ SensorData çš„å­ç±»
+    auto data = std::make_shared<ImageData>();  // ¼ÙÉè ImageData ÊÇ SensorData µÄ×ÓÀà
     data->frame = frame;
-    data->timestamp = cap.get(cv::CAP_PROP_POS_MSEC);  // ä¿æŒæ¯«ç§’å•ä½
+    data->timestamp = cap.get(cv::CAP_PROP_POS_MSEC);  // ±£³ÖºÁÃëµ¥Î»
     
     return data;
 }
@@ -271,15 +275,15 @@ bool VideoStreamReader::enableSave(const std::string& outputPath, double fps) {
     savePath = outputPath;
     saveEnabled = true;
 
-    // æ£€æŸ¥ frameWidth å’Œ frameHeight æ˜¯å¦å·²è¢«è®¾ç½®
+    // ¼ì²é frameWidth ºÍ frameHeight ·ñÒÑ±»ÉèÖÃ
     if (frameWidth == 0 && frameHeight == 0) {
-        return false; // æˆ–è€…æŠ›å‡ºå¼‚å¸¸
+        return false; // »òÕßÅ×³öÒì³£
     }
 
-    // æ‰“å¼€è§†é¢‘å†™å…¥å™¨
+    // ´ò¿ªÊÓÆµĞ´ÈëÆ÷
     writer.open(savePath, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps, cv::Size(frameWidth, frameHeight));
     bool flag = writer.isOpened();
-    return writer.isOpened(); // è¿”å› writer æ˜¯å¦æˆåŠŸæ‰“å¼€
+    return writer.isOpened(); // ·µ»Ø writer ÊÇ·ñ³É¹¦´ò¿ª
 }
 
 void VideoStreamReader::disableSave() {
@@ -288,3 +292,95 @@ void VideoStreamReader::disableSave() {
     }
     saveEnabled = false;
 } 
+
+//==============================================================================
+// TcpClient ÊµÏÖ
+//==============================================================================
+TcpClient::TcpClient(const std::string& address, int port)
+    : serverAddress(address), port(port), sockfd(-1), connected(false) {
+    #ifdef _WIN32
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            throw std::runtime_error("WSAStartup failed");
+        }
+    #endif
+}
+
+TcpClient::~TcpClient() {
+    if (connected) {
+        disconnect();
+    }
+    #ifdef _WIN32
+        WSACleanup();
+    #endif
+}
+
+bool TcpClient::connect() {
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        return false;
+    }
+
+    struct sockaddr_in serverAddr;
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+    
+    if (inet_pton(AF_INET, serverAddress.c_str(), &serverAddr.sin_addr) <= 0) {
+        #ifdef _WIN32
+            closesocket(sockfd);
+        #else
+            close(sockfd);
+        #endif
+        return false;
+    }
+
+    if (::connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        #ifdef _WIN32
+            closesocket(sockfd);
+        #else
+            close(sockfd);
+        #endif
+        return false;
+    }
+
+    connected = true;
+    return true;
+}
+
+bool TcpClient::disconnect() {
+    if (!connected) {
+        return true;
+    }
+    
+    #ifdef _WIN32
+        closesocket(sockfd);
+    #else
+        close(sockfd);
+    #endif
+    connected = false;
+    sockfd = -1;
+    return true;
+}
+
+ssize_t TcpClient::read(uint8_t* buffer, size_t size) {
+    if (!connected) {
+        return -1;
+    }
+    #ifdef _WIN32
+        return recv(sockfd, (char*)buffer, size, 0);
+    #else
+        return ::read(sockfd, buffer, size);
+    #endif
+}
+
+ssize_t TcpClient::write(const uint8_t* data, size_t size) {
+    if (!connected) {
+        return -1;
+    }
+    #ifdef _WIN32
+        return send(sockfd, (char*)data, size, 0);
+    #else
+        return ::write(sockfd, data, size);
+    #endif
+}
