@@ -150,7 +150,7 @@ void SynchronizedCollector::mainSourceLoop() {
             }
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
@@ -185,25 +185,33 @@ void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
 }
 
 void SynchronizedCollector::saveFrames(int64_t timestamp) {
+    static int totalAttempts = 0;
+    static int successfulMatches = 0;
+    
     // 保存雷达数据
     if (auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())) {
         std::string dataPath = baseDir + "/" + mainSource->getSourceName() + "/" +
                               mainSource->getSourceName() + "_" + 
                               std::to_string(timestamp) + ".csv";
         radarSource->saveData(dataPath);
+        totalAttempts++;
     }
     
+    // 保存相机数据
     for (size_t i = 0; i < subSources.size(); ++i) {
-        auto& thread = captureThreads[i + 1];  // +1 跳过主源线程
-        auto& source = subSources[i];
-        
-        cv::Mat frame = findClosestFrame(thread, timestamp);
+        cv::Mat frame = findClosestFrame(captureThreads[i + 1], timestamp);
         if (!frame.empty()) {
-            std::string framePath = baseDir + "/" + source->getSourceName() + "/" +
-                                  source->getSourceName() + "_" + 
+            std::string framePath = baseDir + "/" + subSources[i]->getSourceName() + "/" +
+                                  subSources[i]->getSourceName() + "_" + 
                                   std::to_string(timestamp) + ".jpg";
             cv::imwrite(framePath, frame);
+            successfulMatches++;
         }
+    }
+    
+    if (totalAttempts % 100 == 0) {  // 每100帧打印一次统计
+        std::cout << "同步率: " << (successfulMatches * 100.0 / totalAttempts) 
+                  << "% (" << successfulMatches << "/" << totalAttempts << ")" << std::endl;
     }
 }
 
@@ -216,37 +224,20 @@ cv::Mat SynchronizedCollector::findClosestFrame(CaptureThread& thread, int64_t t
     
     cv::Mat bestFrame;
     int64_t minDiff = (std::numeric_limits<int64_t>::max)();
-    int64_t bestTimestamp = 0;
+    static const int64_t MAX_TIME_DIFF = 50;  // 50ms容忍度
     
-    // 创建临时队列只存储时间戳大于等于目标时间戳的帧
-    std::queue<std::unique_ptr<ImageFrame>> tempQueue;
-    
-    while (!thread.frameBuffer.empty()) {
-        auto& frame = thread.frameBuffer.front();
-        
-        // 如果当前帧时间戳小于目标时间戳，直接丢弃
-        if (frame->timestamp < timestamp) {
-            thread.frameBuffer.pop();
-            continue;
-        }
-        
-        int64_t diff = std::abs(frame->timestamp - timestamp);
+    // 找到最接近的帧，不论是之前还是之后的
+    for (size_t i = 0; i < thread.frameBuffer.size(); ++i) {
+        int64_t diff = std::abs(thread.frameBuffer.front()->timestamp - timestamp);
         if (diff < minDiff) {
             minDiff = diff;
-            bestFrame = frame->frame.clone();
-            bestTimestamp = frame->timestamp;
+            if (diff <= MAX_TIME_DIFF) {  // 只接受在容忍范围内的帧
+                bestFrame = thread.frameBuffer.front()->frame.clone();
+            }
         }
-        
-        tempQueue.push(std::move(thread.frameBuffer.front()));
+        // 循环移动队列
+        thread.frameBuffer.push(std::move(thread.frameBuffer.front()));
         thread.frameBuffer.pop();
-    }
-    
-    // 只保留最近匹配帧之后的帧
-    while (!tempQueue.empty()) {
-        if (tempQueue.front()->timestamp >= bestTimestamp) {
-            thread.frameBuffer.push(std::move(tempQueue.front()));
-        }
-        tempQueue.pop();
     }
     
     return bestFrame;
