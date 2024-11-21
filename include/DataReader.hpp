@@ -1,16 +1,11 @@
 // DataReader.hpp - 数据读取接口和实现
 #pragma once
-#include "SensorData.hpp"
 #include <string>
 #include <memory>
 #include <fstream>
 #include <cstddef>  // for size_t
-#ifdef _WIN32
-    #include <winsock2.h>
-    typedef long long ssize_t;
-#else
-    #include <sys/types.h>  // for ssize_t on Unix-like systems
-#endif
+#include "SensorData.hpp"
+#include "TcpCommandHandler.hpp"
 
 // 在其他类声明之前添加前向声明
 class SerialPortImpl;
@@ -105,51 +100,24 @@ public:
     }
 };
 
-class TcpClient {
-private:
-    std::string serverAddress;
-    int port;
-    int sockfd;
-    bool connected;
 
-public:
-    TcpClient(const std::string& address = "192.168.10.117", int port = 50000);
-    ~TcpClient();
+// // tcp雷达数据读取器
+// class TcpDataReader : public IDataReader {
+// private:
+//     std::shared_ptr<TcpCommandHandler> handler;  // 改用 TcpCommandHandler
     
-    bool connect();
-    bool disconnect();
-    bool isConnected() const { return connected; }
+// public:
+//     explicit TcpDataReader(const std::string& address = "192.168.10.117", int port = 50000)
+//         : handler(std::make_shared<TcpCommandHandler>(address, port)) {}
+        
+//     bool init() override {
+//         return handler->connect();
+//     }
     
-    // 读写方法
-    ssize_t read(uint8_t* buffer, size_t size);
-    ssize_t write(const uint8_t* data, size_t size);
+//     bool readNext() override;
+//     std::shared_ptr<SensorData> getData() override;
+//     bool isEnd() const override { 
+//         return !handler || !handler->isConnected(); 
+//     }
+// };
 
-    bool setReceiveTimeout(int milliseconds) {
-        #ifdef _WIN32
-            DWORD timeout = milliseconds;
-            return setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, 
-                (const char*)&timeout, sizeof(timeout)) == 0;
-        #else
-            struct timeval tv;
-            tv.tv_sec = milliseconds / 1000;
-            tv.tv_usec = (milliseconds % 1000) * 1000;
-            return setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
-                (const char*)&tv, sizeof(tv)) == 0;
-        #endif
-    }
-    
-    int getSocket() const { return sockfd; }
-};
-
-// 然后创建一个专门用于数据读取的包装类
-class TcpDataReader : public IDataReader {
-private:
-    std::shared_ptr<TcpClient> tcpClient;
-    
-public:
-    explicit TcpDataReader(std::shared_ptr<TcpClient> client);
-    bool init() override;
-    bool readNext() override;
-    std::shared_ptr<SensorData> getData() override;
-    bool isEnd() const override { return !tcpClient->isConnected(); }
-};

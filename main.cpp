@@ -1,11 +1,14 @@
-ï»¿#include <iostream>
+#include <iostream>
 #include <string>
 #include <memory>
 #include "DataReaderFactory.hpp"
 #include "TcpCommandHandler.hpp"
+#include "SynchronizedCollector.hpp"
 #include <windows.h>
+#include <filesystem>
 
-// ç”¨äºæ‰“å°åå…­è¿›åˆ¶æ•°æ®
+
+// ÓÃÓÚ´òÓ¡Ê®Áù½øÖÆÊı¾İ
 void printHex(const std::vector<uint8_t>& data) {
     for (uint8_t byte : data) {
         std::cout << std::hex << std::setw(2) << std::setfill('0') 
@@ -15,38 +18,38 @@ void printHex(const std::vector<uint8_t>& data) {
 }
 
 void testVideoReader() {
-    // æœ¬åœ°è§†é¢‘æ–‡ä»¶è·¯å¾„
-    std::string videoPath = "E:/dataset/How Tower Cranes Build Themselves1080p.mp4";  // æ›¿æ¢ä¸ºä½ çš„è§†é¢‘è·¯å¾„
-    std::string savePath = "test_output.avi";  // ä¿å­˜è·¯å¾„
+    // ±¾µØÊÓÆµÎÄ¼şÂ·¾¶
+    std::string videoPath = "E:/dataset/How Tower Cranes Build Themselves1080p.mp4";  // Ìæ»»ÎªÄãµÄÊÓÆµÂ·¾¶
+    std::string savePath = "test_output.avi";  // ±£´æÂ·¾¶
     
-    // ä½¿ç”¨å·¥å‚ç±»åˆ›å»ºè§†é¢‘è¯»å–å™¨
+    // Ê¹ÓÃ¹¤³§Àà´´½¨ÊÓÆµ¶ÁÈ¡Æ÷
     auto reader = DataReaderFactory::createReader(ReaderType::VIDEO_STREAM, videoPath);
     if (!reader) {
         std::cerr << "Failed to create video reader!" << std::endl;
         return;
     }
     
-    // è½¬æ¢ä¸ºVideoStreamReaderä»¥ä½¿ç”¨ç‰¹å®šåŠŸèƒ½
+    // ×ª»»ÎªVideoStreamReaderÒÔÊ¹ÓÃÌØ¶¨¹¦ÄÜ
     auto videoReader = std::dynamic_pointer_cast<VideoStreamReader>(reader);
     if (!videoReader) {
         std::cerr << "Failed to cast to VideoStreamReader!" << std::endl;
         return;
     }
     
-    // åˆå§‹åŒ–
+    // ³õÊ¼»¯
     if (!videoReader->init()) {
         std::cerr << "Failed to initialize video reader!" << std::endl;
         return;
     }
     
-    // å¯ç”¨ä¿å­˜
+    // ÆôÓÃ±£´æ
     if (!videoReader->enableSave(savePath, 30.0)) {
         std::cerr << "Failed to enable video saving!" << std::endl;
         return;
     }
     
     int frameCount = 0;
-    // è¯»å–å¹¶ä¿å­˜è§†é¢‘å¸§
+    // ¶ÁÈ¡²¢±£´æÊÓÆµÖ¡
     while (videoReader->grabFrame()) {
         auto data = videoReader->getData();
         if (data) {
@@ -54,10 +57,10 @@ void testVideoReader() {
             std::cout << "Frame " << frameCount 
                       << ", Timestamp: " << data->timestamp << "ms" << std::endl;
             
-            // æ˜¾ç¤ºå½“å‰å¸§
+            // ÏÔÊ¾µ±Ç°Ö¡
             cv::Mat& frame = std::dynamic_pointer_cast<ImageData>(data)->frame;
             cv::imshow("Video", frame);
-            if (cv::waitKey(1) == 27) {  // ESCé”®é€€å‡º
+            if (cv::waitKey(1) == 27) {  // ESC¼üÍË³ö
                 break;
             }
         }
@@ -69,212 +72,158 @@ void testVideoReader() {
 }
 
 void testTcpClient() {
-    // åˆ›å»ºTCPå®¢æˆ·ç«¯å®ä¾‹
+    // ´´½¨TCP¿Í»§¶ËÊµÀı
     TcpClient client("192.168.10.117", 50000);
     
-    // å°è¯•è¿æ¥æœåŠ¡å™¨
+    // ³¢ÊÔÁ¬½Ó·şÎñÆ÷
     if (!client.connect()) {
-        std::cout << "è¿æ¥æœåŠ¡å™¨å¤±è´¥ï¼" << std::endl;
+        std::cout << "Á¬½Ó·şÎñÆ÷Ê§°Ü£¡" << std::endl;
         return;
     }
     
-    std::cout << "æˆåŠŸè¿æ¥åˆ°æœåŠ¡å™¨ï¼" << std::endl;
+    std::cout << "³É¹¦Á¬½Óµ½·şÎñÆ÷£¡" << std::endl;
     
-    // å‡†å¤‡å‘é€çš„æµ‹è¯•æ•°æ®
+    // ×¼±¸·¢ËÍµÄ²âÊÔÊı¾İ
     std::vector<uint8_t> sendData = {0x01, 0x02, 0x03, 0x04, 0x05};
     
-    // å‘é€æ•°æ®
+    // ·¢ËÍÊı¾İ
     ssize_t sendResult = client.write(sendData.data(), sendData.size());
     if (sendResult < 0) {
-        std::cout << "å‘é€æ•°æ®å¤±è´¥ï¼" << std::endl;
+        std::cout << "·¢ËÍÊı¾İÊ§°Ü£¡" << std::endl;
         client.disconnect();
         return;
     }
     
-    std::cout << "æˆåŠŸå‘é€ " << sendResult << " å­—èŠ‚çš„æ•°æ®" << std::endl;
+    std::cout << "³É¹¦·¢ËÍ " << sendResult << " ×Ö½ÚµÄÊı¾İ" << std::endl;
     
-    // å‡†å¤‡æ¥æ”¶ç¼“å†²åŒº
+    // ×¼±¸½ÓÊÕ»º³åÇø
     std::vector<uint8_t> recvBuffer(1024);
     
-    // æ¥æ”¶æ•°
+    // ½ÓÊÕÊı
     ssize_t recvResult = client.read(recvBuffer.data(), recvBuffer.size());
     if (recvResult < 0) {
-        std::cout << "æ¥æ”¶æ•°æ®å¤±è´¥ï¼" << std::endl;
+        std::cout << "½ÓÊÕÊı¾İÊ§°Ü£¡" << std::endl;
     } else if (recvResult > 0) {
-        std::cout << "æ¥æ”¶åˆ° " << recvResult << " å­—èŠ‚çš„æ•°æ®ï¼š";
-        // æ‰“å°æ¥æ”¶åˆ°çš„æ•°æ®ï¼ˆåå…­è¿›åˆ¶æ ¼å¼ï¼‰
-        for (size_t i = 0; i < recvResult; ++i) {
+        std::cout << "½ÓÊÕµ½ " << recvResult << " ×Ö½ÚµÄÊı¾İ£º";
+        // ´òÓ¡½ÓÊÕµ½µÄÊı¾İ£¨Ê®Áù½øÖÆ¸ñÊ½£©
+        for (ssize_t i = 0; i < recvResult; ++i) {
             printf("%02X ", recvBuffer[i]);
         }
         std::cout << std::endl;
     }
     
-    // ç­‰å¾…ä¸€æ®µæ—¶é—´
+    // µÈ´ıÒ»¶ÎÊ±¼ä
     std::this_thread::sleep_for(std::chrono::seconds(1));
     
-    // æ–­å¼€è¿æ¥
+    // ¶Ï¿ªÁ¬½Ó
     client.disconnect();
-    std::cout << "å·²æ–­å¼€è¿æ¥" << std::endl;
+    std::cout << "ÒÑ¶Ï¿ªÁ¬½Ó" << std::endl;
 }
 
-void testTcpCommandHandler() {
-    // åˆ›å»ºTCPå®¢æˆ·ç«¯å’Œå‘½ä»¤å¤„ç†å™¨
-    TcpClient client("192.168.10.117", 50000);
-    TcpCommandHandler handler(client);
-    
-    // è¿æ¥æœåŠ¡å™¨
-    if (!client.connect()) {
-        std::cout << "è¿æ¥æœåŠ¡å™¨å¤±è´¥ï¼" << std::endl;
-        return;
-    }
-    std::cout << "æˆåŠŸè¿æ¥åˆ°æœåŠ¡å™¨ï¼" << std::endl;
-    
-    // è®¾ç½®æ¥æ”¶è¶…æ—¶
-    client.setReceiveTimeout(100);  // 100msè¶…æ—¶
-    
-    // æµ‹è¯•å‘é€å‘½ä»¤
-    uint8_t srcAddr = 0x10;
-    uint8_t destAddr = 0x90;
-    CommandCode cmd = CommandCode::READ_RADAR_STATUS;
-    std::vector<uint8_t> testData = {};
-    
-    std::cout << "\nå‘é€æµ‹è¯•å‘½ä»¤..." << std::endl;
-    if (handler.sendFrame(srcAddr, destAddr, cmd, testData)) {
-        std::cout << "å‘½ä»¤å‘é€æˆåŠŸï¼" << std::endl;
-    } else {
-        std::cout << "å‘½ä»¤å‘é€å¤±è´¥ï¼" << std::endl;
-        client.disconnect();
-        return;
-    }
-    
-    // æ¥æ”¶å’Œå¤„ç†æ•°æ®
-    auto lastTime = std::chrono::steady_clock::now();
-    int frameCount = 0;
-    
-    std::cout << "\nå¼€å§‹æ¥æ”¶æ•°æ®..." << std::endl;
-    while (true) {
-        try {
-            ProtocolFrame receivedFrame;
-            if (handler.receiveFrame(receivedFrame)) {
-                frameCount++;
-                
-                // è®¡ç®—æ—¶é—´é—´éš”
-                auto currentTime = std::chrono::steady_clock::now();
-                auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    currentTime - lastTime).count();
-                lastTime = currentTime;
-                
-                // è¾“å‡ºå¸§ä¿¡æ¯
-                std::cout << "\næ¥æ”¶åˆ°ç¬¬ " << frameCount << " å¸§æ•°æ®:" << std::endl;
-                std::cout << "å‘½ä»¤ç : 0x" << std::hex 
-                          << static_cast<int>(static_cast<uint8_t>(receivedFrame.header.command))
-                          << std::dec << std::endl;
-                std::cout << "æºåœ°å€: 0x" << std::hex 
-                          << static_cast<int>(receivedFrame.header.srcAddr) << std::endl;
-                std::cout << "ç›®æ ‡åœ°å€: 0x" 
-                          << static_cast<int>(receivedFrame.header.destAddr) << std::dec << std::endl;
-                std::cout << "æ•°æ®é•¿åº¦: " 
-                          << (receivedFrame.header.lengthLow | (receivedFrame.header.lengthHigh << 8)) 
-                          << " å­—èŠ‚" << std::endl;
-                std::cout << "æ—¶é—´é—´éš”: " << interval << "ms" << std::endl;
-                
-                // æ‰“å°æ•°æ®å†…å®¹ï¼ˆåå…­è¿›åˆ¶ï¼‰
-                if (!receivedFrame.data.empty()) {
-                    std::cout << "æ•°æ®å†…å®¹: ";
-                    for (uint8_t byte : receivedFrame.data) {
-                        std::cout << std::hex << std::setw(2) << std::setfill('0') 
-                                  << static_cast<int>(byte) << " ";
-                    }
-                    std::cout << std::dec << std::endl;
-                }
-            }
-            
-            // æ£€æŸ¥é€€å‡ºæ¡ä»¶
-            if (GetAsyncKeyState(VK_ESCAPE)) {
-                std::cout << "\næ£€æµ‹åˆ°ESCé”®, é€€å‡ºæµ‹è¯•" << std::endl;
-                break;
-            }
-            
-            // é¿å…CPUå ç”¨è¿‡é«˜
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            
-        } catch (const std::exception& e) {
-            std::cerr << "é”™è¯¯: " << e.what() << std::endl;
-            break;
-        }
-    }
-    
-    // è¾“å‡ºç»Ÿè®¡ä¿¡æ¯
-    std::cout << "\næµ‹è¯•ç»“æŸ" << std::endl;
-    std::cout << "æ€»å…±æ¥æ”¶: " << frameCount << " å¸§æ•°æ®" << std::endl;
-    
-    // æ–­å¼€è¿æ¥
-    client.disconnect();
-    std::cout << "å·²æ–­å¼€è¿æ¥" << std::endl;
-}
-
+// ²âÊÔÀ×´ï 
 void testRadar() {
-    // åˆ›å»ºTCPå®¢æˆ·ç«¯å’Œå‘½ä»¤å¤„ç†å™¨
-    TcpClient client("192.168.10.117", 50000);
-    TcpCommandHandler handler(client);
-    
-    // è¿æ¥æœåŠ¡å™¨
-    if (!client.connect()) {
-        std::cout << "è¿æ¥æœåŠ¡å™¨å¤±è´¥ï¼" << std::endl;
-        return;
-    }
-    std::cout << "æˆåŠŸè¿æ¥åˆ°æœåŠ¡å™¨ï¼" << std::endl;
-    
-    // è®¾ç½®æ¥æ”¶è¶…æ—¶
-    client.setReceiveTimeout(100);  // 100msè¶…æ—¶
+    try {
+        // ´´½¨ÃüÁî´¦ÀíÆ÷
+        TcpCommandHandler handler("192.168.10.117", 50000);
+        
+        // ´´½¨±£´æÄ¿Â¼
+        std::string saveDir = "radar_data";
+        if (!std::filesystem::exists(saveDir)) {
+            std::filesystem::create_directory(saveDir);
+        }
+        
+        // Á¬½ÓÀ×´ï
+        if (!handler.connect()) {
+            std::cerr << "ÎŞ·¨Á¬½Óµ½À×´ïÉè±¸" << std::endl;
+            return;
+        }
+        std::cout << "³É¹¦Á¬½Óµ½À×´ïÉè±¸" << std::endl;
 
-    // æ¥æ”¶å’Œå¤„ç†æ•°æ®
-    auto lastTime = std::chrono::steady_clock::now();
-    int frameCount = 0;
-    
-    std::cout << "\nå¼€å§‹æ¥æ”¶æ•°æ®..." << std::endl;
-    while (true) {
-        try {
-            ProtocolFrame receivedFrame;
-            if (handler.receiveFrame(receivedFrame)) {
-                frameCount++;
-                
-                // è®¡ç®—æ—¶é—´é—´éš”
-                auto currentTime = std::chrono::steady_clock::now();
-                auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    currentTime - lastTime).count();
-                lastTime = currentTime;
-
-                CommandParseResult result{std::monostate{}};  // ä½¿ç”¨èŠ±æ‹¬å·åˆå§‹åŒ–
-                if (Protocol::parseCommandData(receivedFrame, result)) {
-                    if (auto* targets = std::get_if<std::vector<TargetInfoParse_0xA8::TargetInfo>>(&result)) {
-                        // ä½¿ç”¨ targets æ•°æ® 
-                        std::cout << "æ¥æ”¶åˆ° " << targets->size() << " ä¸ªç›®æ ‡" << std::endl;
-
-                        // å°†è¯¥æ•°æ®ä¿å­˜åˆ°æ–‡ä»¶ï¼Œä½¿ç”¨æ—¶é—´æˆ³
+        // Ö÷Ñ­»·
+        int count = 0;
+        const int totalFrames = 200;
+        const int printInterval = 10;  // Ã¿10Ö¡´òÓ¡Ò»´Î
+        auto lastTime = std::chrono::steady_clock::now();
+        auto lastPrintTime = std::chrono::steady_clock::now();
+        
+        while (count < totalFrames) {
+            CommandParseResult result;
+            if (handler.receiveAndParseFrame(result)) {
+                if (auto* targets = std::get_if<std::vector<TargetInfoParse_0xA8::TargetInfo>>(&result)) {
+                    // Éú³ÉÊ±¼ä´ÁÎÄ¼şÃû
+                    auto now = std::chrono::system_clock::now();
+                    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now.time_since_epoch()).count();
+                    std::string filename = saveDir + "/radar_" + std::to_string(timestamp) + ".csv";
+                    
+                    // ±£´æµ±Ç°Ö¡Êı¾İ
+                    if (handler.startRecording(filename)) {
+                        // std::cout << "±£´æÖ¡Êı¾İµ½: " << filename << std::endl;
+                        // std::cout << "½ÓÊÕµ½Ä¿±êÊıÁ¿: " << targets->size() << std::endl;
+                        handler.saveTargetData(*targets);
+                        handler.stopRecording();
+                    }
+                    
+                    // Ã¿¸ôÒ»¶¨Ö¡Êı²Å´òÓ¡½ø¶È
+                    if (count % printInterval == 0) {
+                        auto now = std::chrono::steady_clock::now();
+                        auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now - lastPrintTime).count();
+                        lastPrintTime = now;
                         
+                        float progress = (count + 1) * 100.0f / totalFrames;
+                        std::cout << "\r²É¼¯½ø¶È: " << std::fixed << std::setprecision(1) 
+                                  << progress << "% (" << (count + 1) << "/" << totalFrames 
+                                  << "), Æ½¾ù²É¼¯¼ä¸ô: " << interval / printInterval << "ms" 
+                                  << std::flush;  // Ê¹ÓÃ\rºÍstd::flushÊµÏÖÔ­µØ¸üĞÂ
                     }
                 }
+                count++;
             }
-        } catch (const std::exception& e) {
-            std::cerr << "é”™è¯¯: " << e.what() << std::endl;
-            break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        std::cout << std::endl;  // Íê³Éºó»»ĞĞ
+        
+        handler.disconnect();
+        std::cout << "²âÊÔÍê³É£¬ÒÑ¶Ï¿ªÁ¬½Ó" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "À×´ï²âÊÔÒì³£: " << e.what() << std::endl;
     }
-    // è¾“å‡ºç»Ÿè®¡ä¿¡æ¯
-    std::cout << "\næµ‹è¯•ç»“æŸ" << std::endl;
-    std::cout << "æ€»å…±æ¥æ”¶: " << frameCount << " å¸§æ•°æ®" << std::endl;
-    
-    // æ–­å¼€è¿æ¥
-    client.disconnect();
-    std::cout << "å·²æ–­å¼€è¿æ¥" << std::endl;
 }
+
+void testMultiSourceCapture() {
+    try {
+        SynchronizedCollector collector;
+        
+        // Ìí¼ÓÊı¾İÔ´
+        collector.addSource(std::make_unique<VideoSource>("E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera1"));
+        // collector.addSource(std::make_unique<VideoSource>("camera2.mp4", "camera2"));
+        collector.addSource(std::make_unique<RadarSource>("192.168.10.117", 50000, "radar"));
+        
+        collector.start();
+        
+        while (true) {
+            if (cv::waitKey(5000) == 27) break;
+            collector.printStats();
+        }
+        
+        collector.stop();
+        
+    } catch (const std::exception& e) {
+        std::cerr << "¶àÔ´²É¼¯Òì³£: " << e.what() << std::endl;
+    }
+}
+
 
 int main() {
+    // ÉèÖÃOpenCVÈÕÖ¾¼¶±ğ
+    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
+
     try {
-        testRadar();
+        testMultiSourceCapture();
     } catch (const std::exception& e) {
-        std::cerr << "ç¨‹åºå¼‚å¸¸: " << e.what() << std::endl;
+        std::cerr << "³ÌĞòÒì³£: " << e.what() << std::endl;
         return -1;
     }
     

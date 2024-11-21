@@ -1,4 +1,3 @@
 build/
 .vscode/
-.3rd/
-CMakeLists.txt
+3rd/

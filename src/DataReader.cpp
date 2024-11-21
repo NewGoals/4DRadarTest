@@ -27,6 +27,7 @@ bool FileReader::init() {
         }
         return !fileList.empty();
     } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
         return false;
     }
 }
@@ -238,7 +239,10 @@ bool VideoStreamReader::init() {
             frameWidth = frame.cols;
             frameHeight = frame.rows;
         }
-    } else return false;
+    }
+    else {
+        return false;
+    }
 
     return true;
 }
@@ -266,7 +270,7 @@ std::shared_ptr<SensorData> VideoStreamReader::getData() {
     
     auto data = std::make_shared<ImageData>();  // 假设 ImageData 是 SensorData 的子类
     data->frame = frame;
-    data->timestamp = cap.get(cv::CAP_PROP_POS_MSEC);  // 保持毫秒单位
+    data->timestamp = static_cast<int64_t>(cap.get(cv::CAP_PROP_POS_MSEC));  // 显式转换为 int64_t
     
     return data;
 }
@@ -293,94 +297,3 @@ void VideoStreamReader::disableSave() {
     saveEnabled = false;
 } 
 
-//==============================================================================
-// TcpClient 实现
-//==============================================================================
-TcpClient::TcpClient(const std::string& address, int port)
-    : serverAddress(address), port(port), sockfd(-1), connected(false) {
-    #ifdef _WIN32
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            throw std::runtime_error("WSAStartup failed");
-        }
-    #endif
-}
-
-TcpClient::~TcpClient() {
-    if (connected) {
-        disconnect();
-    }
-    #ifdef _WIN32
-        WSACleanup();
-    #endif
-}
-
-bool TcpClient::connect() {
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        return false;
-    }
-
-    struct sockaddr_in serverAddr;
-    memset(&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);
-    
-    if (inet_pton(AF_INET, serverAddress.c_str(), &serverAddr.sin_addr) <= 0) {
-        #ifdef _WIN32
-            closesocket(sockfd);
-        #else
-            close(sockfd);
-        #endif
-        return false;
-    }
-
-    if (::connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-        #ifdef _WIN32
-            closesocket(sockfd);
-        #else
-            close(sockfd);
-        #endif
-        return false;
-    }
-
-    connected = true;
-    return true;
-}
-
-bool TcpClient::disconnect() {
-    if (!connected) {
-        return true;
-    }
-    
-    #ifdef _WIN32
-        closesocket(sockfd);
-    #else
-        close(sockfd);
-    #endif
-    connected = false;
-    sockfd = -1;
-    return true;
-}
-
-ssize_t TcpClient::read(uint8_t* buffer, size_t size) {
-    if (!connected) {
-        return -1;
-    }
-    #ifdef _WIN32
-        return recv(sockfd, (char*)buffer, size, 0);
-    #else
-        return ::read(sockfd, buffer, size);
-    #endif
-}
-
-ssize_t TcpClient::write(const uint8_t* data, size_t size) {
-    if (!connected) {
-        return -1;
-    }
-    #ifdef _WIN32
-        return send(sockfd, (char*)data, size, 0);
-    #else
-        return ::write(sockfd, data, size);
-    #endif
-}

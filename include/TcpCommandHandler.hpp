@@ -5,6 +5,17 @@
 #include <memory>
 #include <functional>
 #include <variant>
+#include <atomic>
+#include <fstream>
+#include <chrono>
+#ifdef _WIN32
+    #include <WinSock2.h>
+    #include <WS2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+    typedef long long ssize_t;
+#else
+    #include <sys/socket.h>
+#endif
 
 // 命令码枚举定义
 enum class CommandCode : uint8_t {
@@ -142,10 +153,55 @@ public:
     static bool parseCommandData(const ProtocolFrame& frame, CommandParseResult& result);
 };
 
+// TcpClient 类
+class TcpClient {
+private:
+    std::string serverAddress;
+    int port;
+#ifdef _WIN32
+    SOCKET sockfd;  // Windows下使用SOCKET类型
+#else
+    int sockfd;     // Unix系统下使用int类型
+#endif
+    bool connected;
+
+public:
+    TcpClient(const std::string& address = "192.168.10.117", int port = 50000);
+    ~TcpClient();
+    
+    bool connect();
+    bool disconnect();
+    bool isConnected() const { return connected; }
+    
+    // 读写方法
+    ssize_t read(uint8_t* buffer, size_t size);
+    ssize_t write(const uint8_t* data, size_t size);
+
+    bool setReceiveTimeout(int milliseconds) {
+        #ifdef _WIN32
+            DWORD timeout = milliseconds;
+            return setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, 
+                (const char*)&timeout, sizeof(timeout)) == 0;
+        #else
+            struct timeval tv;
+            tv.tv_sec = milliseconds / 1000;
+            tv.tv_usec = (milliseconds % 1000) * 1000;
+            return setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                (const char*)&tv, sizeof(tv)) == 0;
+        #endif
+    }
+    
+    #ifdef _WIN32
+        SOCKET getSocket() const { return sockfd; }
+    #else
+        int getSocket() const { return sockfd; }
+    #endif
+};
+
 // TCP原始数据操作类
 class TcpCommandHandler {
 private:
-    TcpClient& tcpClient;        // 引用TcpClient对象   
+    std::shared_ptr<TcpClient> tcpClient;   // 智能指针管理TcpClient对象
     ParseFrameState parseState;  // 解析状态
     std::vector<uint8_t> parseBuffer;  // 解析缓冲区
     size_t parseBufCount;  // 解析缓冲区计数
@@ -157,33 +213,65 @@ private:
     size_t dataStart = 0;  // 有效数据起始位置
     size_t dataSize = 0;   // 有效数据大小
 
+    std::atomic<bool> isRunning{false};  // 用于控制异步接收线程
+
+    // 文件保存相关成员
+    std::ofstream dataFile;
+    bool isRecording = false;
+    std::string saveFilePath;
+    int64_t recordStartTime;  // 添加记录开始时间
+
 public:
-    explicit TcpCommandHandler(TcpClient& client) 
-        : tcpClient(client)
+    explicit TcpCommandHandler(const std::string& address = "192.168.10.117", int port = 50000)
+        : tcpClient(std::make_shared<TcpClient>(address, port))
         , parseState(ParseFrameState::START)
         , parseBufCount(0)
         , expectedDataLen(0) {
             recvBuffer.resize(RECV_BUFFER_SIZE);
         }
+
+    ~TcpCommandHandler() {
+        stopAsyncReceive();
+    }
+
+    // 连接管理
+    bool connect() { return tcpClient->connect(); }
+    bool disconnect() { return tcpClient->disconnect(); }
+    bool isConnected() const { return tcpClient->isConnected(); }
     
     // 发送数据
     bool sendFrame(uint8_t srcAddr, uint8_t destAddr, CommandCode command, 
                   const std::vector<uint8_t>& data = {});
-    
-    // 接收并解析数据
-    bool receiveFrame(ProtocolFrame& frame);
-
-    // 添加新的便捷方法
-    bool sendCommand(CommandCode command, const std::vector<uint8_t>& data = {}) {
+    bool quickSendCommand(CommandCode command, const std::vector<uint8_t>& data = {}) {
         // 使用默认地址发送命令
         return sendFrame(0x10, 0x90, command, data);
     }
+
+    // 接收数据
+    bool receiveFrame(ProtocolFrame& frame);    // 接收数据，并解析为协议帧
+    bool receiveAndParseFrame(CommandParseResult& result);  // 接收数据，并解析为命令结果
     
     // 添加异步接收回调支持
     using FrameHandler = std::function<void(const ProtocolFrame&)>;
     void setFrameHandler(FrameHandler handler) {
-        frameHandler = handler;
+        frameHandler = std::move(handler);
     }
+
+    // 新增：启动异步接收
+    bool startAsyncReceive();
+    void stopAsyncReceive();
+
+    // 超时设置
+    bool setReceiveTimeout(int milliseconds) {
+        return tcpClient->setReceiveTimeout(milliseconds);
+    }
+
+    // 添加数据记录控制方法
+    bool startRecording(const std::string& filePath);
+    void stopRecording();
+    bool isDataRecording() const { return isRecording; }
+    void saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets);
+
 
 private:
     // 重置解析状态
@@ -191,4 +279,7 @@ private:
 
     bool parseFrame(const std::vector<uint8_t>& data, ProtocolFrame& frame);
     FrameHandler frameHandler;  // 回调函数
+
+    // 新增：异步接收线程函数
+    void asyncReceiveLoop();
 };

@@ -159,8 +159,8 @@ bool Protocol::parseCommandData(const ProtocolFrame& frame, CommandParseResult& 
         {
             auto cmdParser = std::make_unique<TargetInfoParse_0xA8>();
             if (cmdParser && cmdParser->parse(frame.data.data(), frame.data.size())) {
-                cmdParser->print();
-                auto result = cmdParser->getTargets();
+                // cmdParser->print();
+                result = cmdParser->getTargets();
                 return true;
             }
             break;
@@ -174,13 +174,107 @@ bool Protocol::parseCommandData(const ProtocolFrame& frame, CommandParseResult& 
     return false;
 }
 
+
+//==============================================================================
+// TcpClient 类实现
+//==============================================================================
+TcpClient::TcpClient(const std::string& address, int port)
+    : serverAddress(address), port(port), sockfd(-1), connected(false) {
+    #ifdef _WIN32
+        WSADATA wsaData;
+        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+            throw std::runtime_error("WSAStartup failed");
+        }
+    #endif
+}
+
+TcpClient::~TcpClient() {
+    if (connected) {
+        disconnect();
+    }
+    #ifdef _WIN32
+        WSACleanup();
+    #endif
+}
+
+bool TcpClient::connect() {
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        return false;
+    }
+
+    struct sockaddr_in serverAddr;
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+    
+    if (inet_pton(AF_INET, serverAddress.c_str(), &serverAddr.sin_addr) <= 0) {
+        #ifdef _WIN32
+            closesocket(sockfd);
+        #else
+            close(sockfd);
+        #endif
+        return false;
+    }
+
+    if (::connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        #ifdef _WIN32
+            closesocket(sockfd);
+        #else
+            close(sockfd);
+        #endif
+        return false;
+    }
+
+    connected = true;
+    return true;
+}
+
+bool TcpClient::disconnect() {
+    if (!connected) {
+        return true;
+    }
+    
+    #ifdef _WIN32
+        closesocket(sockfd);
+    #else
+        close(sockfd);
+    #endif
+    connected = false;
+    sockfd = -1;
+    return true;
+}
+
+ssize_t TcpClient::read(uint8_t* buffer, size_t size) {
+    if (!connected) {
+        return -1;
+    }
+    #ifdef _WIN32
+        return recv(sockfd, (char*)buffer, static_cast<int>(size), 0);
+    #else
+        return ::read(sockfd, buffer, size);
+    #endif
+}
+
+ssize_t TcpClient::write(const uint8_t* data, size_t size) {
+    if (!connected) {
+        return -1;
+    }
+    #ifdef _WIN32
+        return send(sockfd, (char*)data, static_cast<int>(size), 0);
+    #else
+        return ::write(sockfd, data, size);
+    #endif
+}
+
+
 //==============================================================================
 // TcpCommandHandler 类实现
 //==============================================================================
 bool TcpCommandHandler::sendFrame(uint8_t type, uint8_t address, 
                                 CommandCode command, const std::vector<uint8_t>& data) {
     auto frameData = Protocol::packFrame(type, address, command, data);
-    ssize_t sent = tcpClient.write(frameData.data(), frameData.size());
+    ssize_t sent = tcpClient->write(frameData.data(), frameData.size());
     return sent == frameData.size();
 }
 
@@ -193,19 +287,19 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
             std::memmove(recvBuffer.data(), recvBuffer.data() + dataStart, dataSize);
         }
         dataStart = 0;
-        std::cout << "【缓冲区重置】移动数据后, dataStart: 0, dataSize: " << dataSize << std::endl;
+        // std::cout << "【缓冲区重置】移动数据后, dataStart: 0, dataSize: " << dataSize << std::endl;
     }
 
     // 接收新数据
     size_t freeSpace = RECV_BUFFER_SIZE - (dataStart + dataSize);
     if (freeSpace > 0) {
-        ssize_t received = tcpClient.read(recvBuffer.data() + dataStart + dataSize, freeSpace);
+        ssize_t received = tcpClient->read(recvBuffer.data() + dataStart + dataSize, freeSpace);
         if (received > 0) {
             dataSize += received;
-            std::cout << "【接收数据】新接收: " << std::dec << received 
-                      << " bytes, 当前缓冲区大小: " << dataSize << std::endl;
+            // std::cout << "【接收数据】新接收: " << std::dec << received 
+            //           << " bytes, 当前缓冲区大小: " << dataSize << std::endl;
         } else if (received == 0) {
-            std::cerr << "【警告】对端已关闭连接。" << std::endl;
+            // std::cerr << "【警告】对端已关闭连接。" << std::endl;
             return false;
         } else if (received < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
             char errMsg[256];
@@ -215,18 +309,18 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
             strncpy(errMsg, strerror(errno), sizeof(errMsg) - 1);
             errMsg[sizeof(errMsg) - 1] = '\0';
 #endif
-            std::cerr << "【错误】读取数据失败: " << errMsg << std::endl;
+            // std::cerr << "【错误】读取数据失败: " << errMsg << std::endl;
             return false;
         }
     }
 
     // 添加调试信息
-    std::cout << "【数据内容】";
-    for (size_t i = dataStart; i < dataStart + std::min<size_t>(dataSize, 16); ++i) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') 
-                  << static_cast<int>(recvBuffer[i]) << std::dec << " ";
-    }
-    std::cout << std::dec << std::endl;
+    // std::cout << "【数据内容】";
+    // for (size_t i = dataStart; i < dataStart + std::min<size_t>(dataSize, 16); ++i) {
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') 
+    //               << static_cast<int>(recvBuffer[i]) << std::dec << " ";
+    // }
+    // std::cout << std::dec << std::endl;
 
     // 数据解析
     while (dataSize > 0) {
@@ -257,36 +351,36 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
                     FrameHeader* header = reinterpret_cast<FrameHeader*>(parseBuffer.data());
                     expectedDataLen = header->lengthLow | (header->lengthHigh << 8);
                     
-                    std::cout << "【帧头解析完成】预期总长度: " << (Protocol::HEADER_SIZE + expectedDataLen + 1) << std::endl;
+                    // std::cout << "【帧头解析完成】预期总长度: " << (Protocol::HEADER_SIZE + expectedDataLen + 1) << std::endl;
 
                     parseState = ParseFrameState::FRAME_DATA;
                 }
                 break;
 
             case ParseFrameState::FRAME_DATA: {
-                std::cout << "【数据统计】当前帧数据段已解析: " << parseBuffer.size() - Protocol::HEADER_SIZE 
-                          << "/" << expectedDataLen << " 字节"
-                          << ", 缓冲区剩余可用: " << dataSize 
-                          << " 字节"<< std::endl;
+                // std::cout << "【数据统计】当前帧数据段已解析: " << parseBuffer.size() - Protocol::HEADER_SIZE 
+                //           << "/" << expectedDataLen << " 字节"
+                //           << ", 缓冲区剩余可用: " << dataSize 
+                //           << " 字节"<< std::endl;
 
                 // 剩余需要解析的数据量
                 size_t remainingData = expectedDataLen;
 
                 if (dataSize < remainingData + 1) {  // +1 是因为校验和占一个字节   
-                    std::cout << "【解析状态】数据不足，等待更多数据" << std::endl;
+                    // std::cout << "【解析状态】数据不足，等待更多数据" << std::endl;
                     return false;
                 }
-                
-                std::cout << "【计算详情】需要复制数据段: " << remainingData 
-                          << " 字节 + 1 字节校验和" << std::endl;
+
+                // std::cout << "【计算详情】需要复制数据段: " << remainingData 
+                //           << " 字节 + 1 字节校验和" << std::endl;
 
                 // 只复制需要的数据量
                 parseBuffer.insert(parseBuffer.end(), 
                                      recvBuffer.begin() + dataStart,
                                      recvBuffer.begin() + dataStart + remainingData);
                 
-                std::cout << "【数据拷贝】复制了 " << remainingData 
-                          << " 字节, 当前解析帧已解析大小: " << parseBuffer.size() << std::endl;
+                // std::cout << "【数据拷贝】复制了 " << remainingData 
+                //           << " 字节, 当前解析帧已解析大小: " << parseBuffer.size() << std::endl;
                 
                 dataStart += remainingData;
                 dataSize -= remainingData;
@@ -300,13 +394,10 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
                 }
                 parseBuffer.push_back(recvBuffer[dataStart]);
                 dataStart++;
-                dataSize--;
-
-                // 判断命令码是否为0xa8, 如果是则不进行校验 
-                
+                dataSize--;                
 
                 if (Protocol::parseFrame(parseBuffer.data(), parseBuffer.size(), frame)) {
-                    std::cout << "【校验成功】帧解析完成" << std::endl;
+                    // std::cout << "【校验成功】帧解析完成" << std::endl;
                     resetParser();
                     return true;
                 }
@@ -321,6 +412,32 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
     }
     return false;
 }
+
+// 接收数据，并解析为命令结果
+bool TcpCommandHandler::receiveAndParseFrame(CommandParseResult& result) {
+    ProtocolFrame frame;
+    if (!receiveFrame(frame)) {
+        return false;
+    }
+    return Protocol::parseCommandData(frame, result);
+}
+
+// startAsyncReceive 和 stopAsyncReceive 方法实现
+bool TcpCommandHandler::startAsyncReceive() {
+    if (isRunning) return false;
+    
+    isRunning = true;
+    std::thread([this]() {
+        this->asyncReceiveLoop();
+    }).detach();
+    
+    return true;
+}
+
+void TcpCommandHandler::stopAsyncReceive() {
+    isRunning = false;
+}
+
 
 bool TcpCommandHandler::parseFrame(const std::vector<uint8_t>& data, ProtocolFrame& frame) {
     return Protocol::parseFrame(data.data(), data.size(), frame);
@@ -347,4 +464,51 @@ void TcpCommandHandler::resetParser() {
             dataStart = dataStart + dataSize - 2;
         }
     }
+}
+
+// 异步接收线程函数
+void TcpCommandHandler::asyncReceiveLoop() {
+    while (isRunning && isConnected()) {
+        ProtocolFrame frame;
+        if (receiveFrame(frame) && frameHandler) {
+            frameHandler(frame);
+        }
+    }
+}
+
+bool TcpCommandHandler::startRecording(const std::string& filePath) {
+    if (isRecording) return false;
+    recordStartTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    dataFile.open(filePath, std::ios::out);
+    if (!dataFile.is_open()) return false;
+    dataFile << "timestamp,type,x,y,z,range,speed,peak,doppler,snr\n";
+    saveFilePath = filePath;
+    isRecording = true;
+    return true;
+}
+
+void TcpCommandHandler::stopRecording() {
+    if (isRecording) {
+        dataFile.close();
+        isRecording = false;
+    }
+}
+
+void TcpCommandHandler::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets) {
+    if (!isRecording || !dataFile.is_open()) return;
+    
+    for (const auto& target : targets) {
+        dataFile << recordStartTime << ","
+                << target.type << ","
+                << target.x_axes << ","
+                << target.y_axes << ","
+                << target.z_axes << ","
+                << target.rangIdx << ","
+                << target.speed << ","
+                << target.peakVal << ","
+                << target.dopplerIdx << ","
+                << target.aoa_snr << "\n";
+    }
+    dataFile.flush();
 }
