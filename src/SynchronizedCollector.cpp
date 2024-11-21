@@ -17,15 +17,15 @@ bool VideoSource::init() {
 }
 
 bool VideoSource::capture(int64_t timestamp) {
-    if (!reader->grabFrame()) return false;
-    
+    if (!reader->grabFrame()) {
+        return false;
+    }
+
     auto data = reader->getData();
     if (!data) return false;
     
-    cv::Mat& frame = std::dynamic_pointer_cast<ImageData>(data)->frame;
-    std::string framePath = savePath + "/" + sourceName + "_" + 
-                           std::to_string(timestamp) + ".jpg";
-    cv::imwrite(framePath, frame);
+    lastFrame = std::dynamic_pointer_cast<ImageData>(data)->frame.clone();
+    lastTimestamp = timestamp;  // 记录实际的采集时间戳
     return true;
 }
 
@@ -41,6 +41,7 @@ void VideoSource::stop() {
 std::string VideoSource::getSourceName() const {
     return sourceName;
 }
+
 
 
 //==============================================================================
@@ -59,11 +60,8 @@ bool RadarSource::capture(int64_t timestamp) {
     if (!handler->receiveAndParseFrame(result)) return false;
     
     if (auto* targets = std::get_if<std::vector<TargetInfoParse_0xA8::TargetInfo>>(&result)) {
-        std::string dataPath = savePath + "/" + sourceName + "_" + 
-                             std::to_string(timestamp) + ".csv";
-        handler->startRecording(dataPath);
-        handler->saveTargetData(*targets);
-        handler->stopRecording();
+        lastTargets = *targets;  // 保存数据到成员变量
+        lastTimestamp = timestamp;
         return true;
     }
     return false;
@@ -82,36 +80,176 @@ std::string RadarSource::getSourceName() const {
     return sourceName;
 }
 
+void RadarSource::saveData(const std::string& path) {
+    handler->startRecording(path);
+    handler->saveTargetData(lastTargets);
+    handler->stopRecording();
+}
+
 
 //==============================================================================
 // SynchronizedCollector 实现
 //==============================================================================
-void SynchronizedCollector::addSource(std::unique_ptr<DataSource> source) {
-    sources.push_back(std::move(source));
+void SynchronizedCollector::addSource(std::unique_ptr<DataSource> source, bool isMainSource) {
+    if (isMainSource) {
+        mainSource = std::move(source);
+    } else {
+        subSources.push_back(std::move(source));
+        captureThreads.emplace_back();  // 为从源创建采集线程
+    }
 }
 
 void SynchronizedCollector::start() {
-    if (sources.empty()) throw std::runtime_error("没有数据源");
+    std::cout << "开始数据采集..." << std::endl;
     
-    baseDir = "sync_data_" + getCurrentTimeString();
-    std::filesystem::create_directory(baseDir);
-    
-    for (auto& source : sources) {
-        if (!source->init()) {
-            throw std::runtime_error("初始化数据源失败: " + source->getSourceName());
-        }
-        std::string sourceDir = baseDir + "/" + source->getSourceName();
-        source->setSavePath(sourceDir);
+    if (!mainSource) {
+        throw std::runtime_error("未设置主数据源");
     }
     
     isRunning = true;
     startTime = std::chrono::steady_clock::now();
     
-    for (size_t i = 0; i < sources.size(); ++i) {
+    // 创建基础保存目录
+    baseDir = "sync_data_" + getCurrentTimeString();
+    std::filesystem::create_directory(baseDir);
+    
+    std::cout << "创建数据保存目录: " << baseDir << std::endl;
+    
+    // 启动主数据源线程
+    captureThreads.emplace_back();
+    captureThreads.back().thread = std::thread(&SynchronizedCollector::mainSourceLoop, this);
+    
+    // 启动从数据源线程
+    for (size_t i = 0; i < subSources.size(); ++i) {
         captureThreads.emplace_back();
-        auto& ct = captureThreads.back();
-        ct.thread = std::thread(&SynchronizedCollector::captureLoop, this, i);
+        captureThreads.back().thread = std::thread(&SynchronizedCollector::subSourceLoop, this, i);
     }
+    
+    std::cout << "所有采集线程已启动" << std::endl;
+}
+
+void SynchronizedCollector::mainSourceLoop() {
+    auto& thread = captureThreads[0];
+    
+    std::string sourcePath = baseDir + "/" + mainSource->getSourceName();
+    std::filesystem::create_directory(sourcePath);
+    mainSource->setSavePath(sourcePath);
+    
+    while (isRunning) {
+        int64_t timestamp = getCurrentTimestamp();
+        
+        if (auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())) {
+            if (radarSource->capture(timestamp)) {
+                // 使用实际的采集时间戳
+                std::string dataPath = sourcePath + "/" + mainSource->getSourceName() + "_" + 
+                                     std::to_string(timestamp) + ".csv";
+                
+                thread.frameCount++;
+                thread.lastCaptureTime = timestamp;
+                saveFrames(timestamp);  // 使用相同时间戳保存所有数据
+            }
+        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
+void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
+    auto& source = subSources[sourceIndex];
+    auto& thread = captureThreads[sourceIndex + 1];
+    
+    std::string sourcePath = baseDir + "/" + source->getSourceName();
+    std::filesystem::create_directory(sourcePath);
+    source->setSavePath(sourcePath);
+    
+    while (isRunning) {
+        int64_t timestamp = getCurrentTimestamp();
+        
+        if (auto* videoSource = dynamic_cast<VideoSource*>(source.get())) {
+            if (videoSource->capture(timestamp)) {
+                thread.frameCount++;
+                thread.lastCaptureTime = timestamp;
+                
+                std::lock_guard<std::mutex> lock(thread.bufferMutex);
+                if (thread.frameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
+                    thread.frameBuffer.pop();
+                }
+                thread.frameBuffer.push(
+                    std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp)
+                );
+            }
+        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+void SynchronizedCollector::saveFrames(int64_t timestamp) {
+    // 保存雷达数据
+    if (auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())) {
+        std::string dataPath = baseDir + "/" + mainSource->getSourceName() + "/" +
+                              mainSource->getSourceName() + "_" + 
+                              std::to_string(timestamp) + ".csv";
+        radarSource->saveData(dataPath);
+    }
+    
+    for (size_t i = 0; i < subSources.size(); ++i) {
+        auto& thread = captureThreads[i + 1];  // +1 跳过主源线程
+        auto& source = subSources[i];
+        
+        cv::Mat frame = findClosestFrame(thread, timestamp);
+        if (!frame.empty()) {
+            std::string framePath = baseDir + "/" + source->getSourceName() + "/" +
+                                  source->getSourceName() + "_" + 
+                                  std::to_string(timestamp) + ".jpg";
+            cv::imwrite(framePath, frame);
+        }
+    }
+}
+
+cv::Mat SynchronizedCollector::findClosestFrame(CaptureThread& thread, int64_t timestamp) {
+    std::lock_guard<std::mutex> lock(thread.bufferMutex);
+    
+    if (thread.frameBuffer.empty()) {
+        return cv::Mat();
+    }
+    
+    cv::Mat bestFrame;
+    int64_t minDiff = (std::numeric_limits<int64_t>::max)();
+    int64_t bestTimestamp = 0;
+    
+    // 创建临时队列只存储时间戳大于等于目标时间戳的帧
+    std::queue<std::unique_ptr<ImageFrame>> tempQueue;
+    
+    while (!thread.frameBuffer.empty()) {
+        auto& frame = thread.frameBuffer.front();
+        
+        // 如果当前帧时间戳小于目标时间戳，直接丢弃
+        if (frame->timestamp < timestamp) {
+            thread.frameBuffer.pop();
+            continue;
+        }
+        
+        int64_t diff = std::abs(frame->timestamp - timestamp);
+        if (diff < minDiff) {
+            minDiff = diff;
+            bestFrame = frame->frame.clone();
+            bestTimestamp = frame->timestamp;
+        }
+        
+        tempQueue.push(std::move(thread.frameBuffer.front()));
+        thread.frameBuffer.pop();
+    }
+    
+    // 只保留最近匹配帧之后的帧
+    while (!tempQueue.empty()) {
+        if (tempQueue.front()->timestamp >= bestTimestamp) {
+            thread.frameBuffer.push(std::move(tempQueue.front()));
+        }
+        tempQueue.pop();
+    }
+    
+    return bestFrame;
 }
 
 void SynchronizedCollector::stop() {
@@ -121,36 +259,38 @@ void SynchronizedCollector::stop() {
             ct.thread.join();
         }
     }
-    for (auto& source : sources) {
+    for (auto& source : subSources) {
         source->stop();
     }
 }
 
 void SynchronizedCollector::printStats() {
-    auto currentTime = std::chrono::steady_clock::now();
-    double elapsedSeconds = std::chrono::duration<double>(currentTime - startTime).count();
+    std::cout << "\n=== 采集状态报告 ===" << std::endl;
     
-    for (size_t i = 0; i < sources.size(); ++i) {
-        double fps = captureThreads[i].frameCount / elapsedSeconds;
-        std::cout << sources[i]->getSourceName() 
-                  << " 已采集帧数: " << captureThreads[i].frameCount 
-                  << " 帧率: " << std::fixed << std::setprecision(2) << fps << " fps"
+    // 打印主数据源状态
+    if (mainSource) {
+        auto mainThread = &captureThreads[0];
+        std::cout << "主数据源 (" << mainSource->getSourceName() << "): "
+                  << "帧数: " << mainThread->frameCount 
+                  << ", 最后采集时间: " << mainThread->lastCaptureTime << "ms" << std::endl;
+    }
+    
+    // 打印从数据源状态
+    for (size_t i = 0; i < subSources.size(); ++i) {
+        auto& thread = captureThreads[i + 1]; // +1 因为第一个是主数据源
+        std::cout << "从数据源 (" << subSources[i]->getSourceName() << "): "
+                  << "总帧数: " << thread.frameCount 
+                  << ", 缓存帧数: " << thread.frameBuffer.size() 
+                  << ", 最后采集时间: " << thread.lastCaptureTime << "ms"
+                  << ", 缓存利用率: " << (thread.frameBuffer.size() * 100.0 / thread.MAX_BUFFER_SIZE) << "%"
                   << std::endl;
     }
-}
-
-void SynchronizedCollector::captureLoop(size_t sourceIndex) {
-    auto& source = sources[sourceIndex];
-    auto& stats = captureThreads[sourceIndex];
     
-    while (isRunning) {
-        int64_t timestamp = getCurrentTimestamp();
-        if (source->capture(timestamp)) {
-            stats.lastCaptureTime = timestamp;
-            stats.frameCount++;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count();
+    std::cout << "总运行时间: " << duration << "秒" 
+              << ", 平均帧率: " << (captureThreads[0].frameCount / (duration ? duration : 1)) << " fps"
+              << std::endl;
 }
 
 int64_t SynchronizedCollector::getCurrentTimestamp() {

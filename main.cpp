@@ -195,20 +195,37 @@ void testRadar() {
 void testMultiSourceCapture() {
     try {
         SynchronizedCollector collector;
+        std::cout << "创建采集器成功" << std::endl;
         
-        // 添加数据源
-        collector.addSource(std::make_unique<VideoSource>("E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera1"));
-        // collector.addSource(std::make_unique<VideoSource>("camera2.mp4", "camera2"));
-        collector.addSource(std::make_unique<RadarSource>("192.168.10.117", 50000, "radar"));
+        // 添加主数据源（雷达）
+        auto radarSource = std::make_unique<RadarSource>("192.168.10.117", 50000, "radar");
+        if (!radarSource->init()) {
+            throw std::runtime_error("雷达初始化失败");
+        }
+        collector.addSource(std::move(radarSource), true);
+        std::cout << "添加雷达源成功" << std::endl;
+        
+        // 添加从数据源（视频）
+        auto videoSource = std::make_unique<VideoSource>(
+            "E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera1");
+        if (!videoSource->init()) {
+            throw std::runtime_error("视频源初始化失败");
+        }
+        collector.addSource(std::move(videoSource), false);
+        std::cout << "添加视频源成功" << std::endl;
         
         collector.start();
         
         while (true) {
-            if (cv::waitKey(5000) == 27) break;
+            if (cv::waitKey(1000) == 27) {
+                std::cout << "检测到ESC键，准备退出..." << std::endl;
+                break;
+            }
             collector.printStats();
         }
         
         collector.stop();
+        std::cout << "采集已停止" << std::endl;
         
     } catch (const std::exception& e) {
         std::cerr << "多源采集异常: " << e.what() << std::endl;
