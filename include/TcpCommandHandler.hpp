@@ -1,5 +1,21 @@
 #pragma once
-#include "DataReader.hpp"
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #include <WinSock2.h>  // 必须在 windows.h 之前
+    #include <Windows.h>
+    #include <WS2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+    typedef long long ssize_t;
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+#endif
+
+#include <iostream>
 #include <cstdint>
 #include <vector>
 #include <memory>
@@ -8,14 +24,8 @@
 #include <atomic>
 #include <fstream>
 #include <chrono>
-#ifdef _WIN32
-    #include <WinSock2.h>
-    #include <WS2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-    typedef long long ssize_t;
-#else
-    #include <sys/socket.h>
-#endif
+#include <thread>
+
 
 // 命令码枚举定义
 enum class CommandCode : uint8_t {

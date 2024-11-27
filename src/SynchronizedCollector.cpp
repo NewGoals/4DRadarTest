@@ -25,7 +25,7 @@ bool VideoSource::capture(int64_t timestamp) {
     if (!data) return false;
     
     lastFrame = std::dynamic_pointer_cast<ImageData>(data)->frame.clone();
-    lastTimestamp = timestamp;  // 记录实际的采集时间戳
+    lastTimestamp = timestamp;  // 记录实际的采集时间戳，后续可能很少用到，该时间戳来自相机
     return true;
 }
 
@@ -41,7 +41,6 @@ void VideoSource::stop() {
 std::string VideoSource::getSourceName() const {
     return sourceName;
 }
-
 
 
 //==============================================================================

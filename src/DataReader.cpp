@@ -1,14 +1,14 @@
-#ifdef _WIN32
-    #define WIN32_LEAN_AND_MEAN  // 避免包含多余的Windows头文件
-    #include <WinSock2.h>
-    #include <WS2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-#else
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <arpa/inet.h>
-    #include <unistd.h>
-#endif
+// #ifdef _WIN32
+//     #define WIN32_LEAN_AND_MEAN  // 避免包含多余的Windows头文件
+//     #include <WinSock2.h>
+//     #include <WS2tcpip.h>
+//     #pragma comment(lib, "ws2_32.lib")
+// #else
+//     #include <sys/socket.h>
+//     #include <netinet/in.h>
+//     #include <arpa/inet.h>
+//     #include <unistd.h>
+// #endif
 
 #include <iostream>
 #include "DataReader.hpp"
@@ -58,56 +58,130 @@ std::shared_ptr<SensorData> ImageFileReader::getData() {
 //==============================================================================    
 // RadarFileReader 实现
 //==============================================================================
+/// @brief 读取下一帧雷达数据
 bool RadarFileReader::readNext() {
     if (isEnd()) return false;
+    
+    // 根据文件格式选择相应的读取方法
+    Format currentFormat = (format == Format::AUTO) ? 
+        detectFormat(fileList[currentIndex]) : format;
+
+    // 打印雷达文件
+    std::cout << "读取雷达文件: " << fileList[currentIndex] << std::endl;
+        
+    bool success = false;
+    switch (currentFormat) {
+        case Format::BIN:
+            success = readBinData();
+            break;
+        case Format::CSV:
+            success = readCsvData();
+            break;
+        default:
+            std::cerr << "不支持的文件格式" << std::endl;
+            return false;
+    }
+    
+    // 不管正确与否都要下一帧，防止无限循环卡死
     currentIndex++;
+
+    return success;
+}
+
+/// @brief 获取当前帧雷达数据
+/// @return 当前帧雷达数据(SensorData 指针)
+std::shared_ptr<SensorData> RadarFileReader::getData() {
+    if (!radarData) return nullptr;
+    return radarData;
+}
+
+bool RadarFileReader::readBinData() {
+    std::ifstream inFile(fileList[currentIndex], std::ios::binary);
+    if (!inFile) return false;
+
+    // 读取二进制数据的实现...
     return true;
 }
 
-std::shared_ptr<SensorData> RadarFileReader::getData() {
-    if (currentIndex == 0 || currentIndex > fileList.size()) {
-        return nullptr;
-    }
+/// @brief 读取原始CSV格式雷达数据
+bool RadarFileReader::readCsvData() {
+    std::ifstream inFile(fileList[currentIndex]);
+    if (!inFile) return false;
 
-    // 打开当前雷达数据文件
-    std::ifstream inFile(fileList[currentIndex - 1], std::ios::binary);
-    if (!inFile) {
-        return nullptr;
-    }
+    radarData = std::make_shared<RadarData>();
+    std::string line;
 
-    auto data = std::make_shared<RadarData>();
-    
-    // 读取雷达数据
-    std::vector<char> buffer;
-    inFile.seekg(0, std::ios::end);
-    size_t fileSize = inFile.tellg();
-    inFile.seekg(0, std::ios::beg);
-    
-    buffer.resize(fileSize);
-    inFile.read(buffer.data(), fileSize);
-    
-    // 将二进制数据转换为 RadarPoint 结构
-    size_t numPoints = fileSize / sizeof(RadarPoint);
-    data->points.resize(numPoints);
-    memcpy(data->points.data(), buffer.data(), fileSize);
-    
-    // data->timestamp = /* 从文件名或数据中提取时间戳 */;
-    
-    // 如果启用了保存功能，将数据写入输出文件
-    if (saveEnabled && outFile.is_open()) {
-        outFile.write(reinterpret_cast<const char*>(data->points.data()), fileSize);
+    // 读取验证标题行
+    std::getline(inFile, line);
+    if (line != "timestamp,type,x,y,z,range,speed,peak,doppler,snr"){
+        std::cerr << "CSV格式不匹配" << std::endl;
+        return false;
     }
     
-    return data;
+    // 读取数据行
+    while (std::getline(inFile, line)) {
+        std::stringstream ss(line);
+        std::string value;
+        RadarPoint point;
+
+        // timestamp
+        std::getline(ss, value, ',');
+        radarData->timestamp = std::stoll(value);
+
+        // type
+        std::getline(ss, value, ',');
+
+        // x, y, z
+        std::getline(ss, value, ',');
+        point.x = std::stof(value);
+        std::getline(ss, value, ',');
+        point.y = std::stof(value);
+        std::getline(ss, value, ',');
+        point.z = std::stof(value);
+
+        // range
+        std::getline(ss, value, ',');
+
+        // speed
+        std::getline(ss, value, ',');
+        point.v_r = std::stof(value);
+
+        // peak
+        std::getline(ss, value, ',');
+        point.rcs = std::stof(value);
+
+        // doppler, snr
+        std::getline(ss, value, ',');
+        std::getline(ss, value, ',');
+
+        radarData->points.push_back(point);
+    }
+    
+    return true;
 }
 
-bool RadarFileReader::enableSave(const std::string& outputPath) {
+RadarFileReader::Format RadarFileReader::detectFormat(const std::string& filename) {
+    // 根据文件扩展名判断格式
+    std::string ext = std::filesystem::path(filename).extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    
+    if (ext == ".bin") return Format::BIN;
+    if (ext == ".csv") return Format::CSV;
+    
+    // 默认返回二进制格式
+    return Format::BIN;
+}
+
+bool RadarFileReader::enableSave(const std::string& outputPath, Format saveFormat) {
     if (saveEnabled) {
-        disableSave();  // 如果已经启用，先关闭当前文件
+        disableSave();
     }
     
     savePath = outputPath;
-    outFile.open(savePath, std::ios::binary);
+    std::ios_base::openmode mode = (saveFormat == Format::BIN) ? 
+        std::ios::binary : std::ios::out;
+    
+    outFile.open(savePath, mode);
     saveEnabled = outFile.is_open();
     
     return saveEnabled;
@@ -119,6 +193,7 @@ void RadarFileReader::disableSave() {
     }
     saveEnabled = false;
 }
+
 
 //==============================================================================
 // SerialReader 跨平台实现
@@ -229,6 +304,7 @@ std::shared_ptr<SensorData> SerialReader::getData() {
 //==============================================================================
 bool VideoStreamReader::init() {
     if (!cap.open(streamUrl)) {
+        std::cerr << "无法打开video stream: " << streamUrl << std::endl;
         return false;
     }
 
@@ -241,6 +317,7 @@ bool VideoStreamReader::init() {
         }
     }
     else {
+        std::cerr << "无法读取video stream: " << streamUrl << std::endl;
         return false;
     }
 

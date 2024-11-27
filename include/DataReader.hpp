@@ -43,19 +43,39 @@ public:
 
 // 雷达文件读取器
 class RadarFileReader : public FileReader {
+public:
+    enum class Format {
+        BIN,
+        CSV,
+        AUTO    // 自动检测文件格式
+    };
+
 private:
+    std::shared_ptr<RadarData> radarData;   // 当前读取的雷达数据
     bool saveEnabled = false;
     std::string savePath;
     std::ofstream outFile;  // 用于保存雷达数据的文件流
+    Format format = Format::AUTO;
+    
+    // 内部辅助方法
+    bool readBinData();
+    bool readCsvData();
+    Format detectFormat(const std::string& filename);
 
 public:
-    explicit RadarFileReader(const std::string& path) : FileReader(path) {}
+    explicit RadarFileReader(const std::string& path, Format fmt = Format::AUTO) 
+        : FileReader(path), format(fmt) {}
+    
     bool readNext() override;
     std::shared_ptr<SensorData> getData() override;
     
-    // 新增保存相关方法
-    bool enableSave(const std::string& outputPath);
+    // 保存相关方法
+    bool enableSave(const std::string& outputPath, Format saveFormat = Format::BIN);
     void disableSave();
+    
+    // 格式设置
+    void setFormat(Format fmt) { format = fmt; }
+    Format getFormat() const { return format; }
 };
 
 // 串口读取器

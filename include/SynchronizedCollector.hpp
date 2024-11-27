@@ -87,7 +87,7 @@ private:
         std::atomic<int> frameCount{0};
         std::queue<std::unique_ptr<ImageFrame>> frameBuffer;  // 添加帧缓冲
         mutable std::mutex bufferMutex;
-        const size_t MAX_BUFFER_SIZE = 30;  // 最大缓冲帧数
+        const size_t MAX_BUFFER_SIZE = 60;  // 最大缓冲帧数
 
         // 删除复制构造函数和赋值运算符
         CaptureThread(const CaptureThread&) = delete;

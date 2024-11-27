@@ -12,7 +12,7 @@ class DataReaderFactory {
 public:
     static std::shared_ptr<IDataReader> createReader(
         ReaderType type, 
-        const std::string& source,      // 鏂囦欢璺緞鎴栬棰戞祦URL
+        const std::string& source,      // 文件路径或视频流URL
         int baudRate = 115200
     );
 };
