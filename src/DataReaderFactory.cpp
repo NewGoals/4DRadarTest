@@ -1,5 +1,4 @@
 #include "DataReaderFactory.hpp"
-#include "DataReader.hpp"
 
 std::shared_ptr<IDataReader> DataReaderFactory::createReader(
     ReaderType type,

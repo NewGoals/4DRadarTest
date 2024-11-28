@@ -7,14 +7,14 @@
 #include <opencv2/core/utils/logger.hpp>
 
 
-// // 用于打印十六进制数据
-// void printHex(const std::vector<uint8_t>& data) {
-//     for (uint8_t byte : data) {
-//         std::cout << std::hex << std::setw(2) << std::setfill('0') 
-//                   << static_cast<int>(byte) << " ";
-//     }
-//     std::cout << std::dec << std::endl;
-// }
+// 用于打印十六进制数据
+void printHex(const std::vector<uint8_t>& data) {
+    for (uint8_t byte : data) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') 
+                  << static_cast<int>(byte) << " ";
+    }
+    std::cout << std::dec << std::endl;
+}
 
 // void testVideoReader() {
 //     // 本地视频文件路径
@@ -316,6 +316,60 @@ void testDisplayManager(){
     
 }
 
+
+
+void testRealTimeRadarDisplay(){
+    try{
+        SynchronizedCollector collector;
+        std::cout << "创建采集器成功" << std::endl;
+        
+        // 添加主数据源（雷达）
+        auto radarSource = std::make_unique<RadarSource>("192.168.10.117", 50000, "radar");
+        if (!radarSource->init()) {
+            throw std::runtime_error("雷达初始化失败");
+        }
+        collector.addSource(std::move(radarSource), true);
+        std::cout << "添加雷达源成功" << std::endl;
+
+        // 添加从视频源
+        // auto videoSource = std::make_unique<VideoSource>(
+        //     "E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera");
+        auto videoSource = std::make_unique<VideoSource>(
+            "rtsp://127.0.0.1:8554/camera_test", "camera");
+        if (!videoSource->init()) {
+            throw std::runtime_error("视频源初始化失败");
+        }
+        collector.addSource(std::move(videoSource), false);
+        std::cout << "添加视频源成功" << std::endl;
+
+        // 设置保存，雷达保存，视频不保存
+        collector.setSaveConfig(true, true);
+
+        // 创建可视化器
+        DisplayManager displayManager;
+        displayManager.addVisualizer(DisplayManager::DisplayType::POINT_CLOUD, std::make_shared<PointCloudVisualizer>());
+        // 设置窗口布局
+        displayManager.setLayout(DisplayManager::DisplayType::POINT_CLOUD, 100, 100, 800, 600);
+
+        // 启动线程
+        collector.start();
+
+        while(true){
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));  // 改为5ms
+            collector.printStats();
+            displayManager.updateDisplay(collector.getMainSourceData());
+            // 渲染所有可视化器
+            displayManager.renderAll();
+        }
+
+        collector.stop();
+    }
+    catch(const std::exception& e){
+        std::cerr << "testDisplayManager 异常: " << e.what() << '\n';
+    }
+}
+
+
 struct InitDebug {
     InitDebug() {
         AllocConsole();
@@ -326,16 +380,14 @@ struct InitDebug {
     }
 } g_init_debug;
 
-void testDisplayManager();
-
 int main() {
     std::cout << "程序开始运行..." << std::endl;
     std::cout.flush();  // 强制刷新输出缓冲区
     // 设置OpenCV日志级别
-    // cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
+    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
     try {
-        testDisplayManager();
+        testRealTimeRadarDisplay();
     } catch (const std::exception& e) {
         std::cerr << "程序异常: " << e.what() << std::endl;
         return -1;
@@ -344,67 +396,3 @@ int main() {
     return 0;
 }
 
-
-// #include <windows.h>
-// #include <iostream>
-// #define EIGEN_NO_DEBUG  // 禁用调试信息
-// #define EIGEN_USE_BLAS  // 如果使用BLAS，确保定义
-// #include <Eigen/Dense>
-
-// // // OpenCV放在Eigen后面
-// // #include <opencv2/opencv.hpp>
-
-// // PCL相关头文件放在最后
-// #include <pcl/point_cloud.h>
-// #include <pcl/point_types.h>
-// #include <pcl/visualization/pcl_visualizer.h>
-// // #include <pcl/visualization/simple_cloud_viewer.h>
-
-// // #include <Windows.h>
-// // #include "Visualizer.hpp"
-
-// struct InitDebug {
-//     InitDebug() {
-//         AllocConsole();
-//         FILE* dummy;
-//         freopen_s(&dummy, "CONOUT$", "w", stdout);
-//         freopen_s(&dummy, "CONOUT$", "w", stderr);
-//         std::cout << "全局初始化开始" << std::endl;
-//     }
-// } g_init_debug;
-
-// int main() {
-//     std::cout << "程序开始运行..." << std::endl;
-//     std::cout.flush();
-
-//     try {
-//         // 1. 首先只测试Eigen
-//         std::cout << "测试Eigen..." << std::endl;
-//         Eigen::Vector3d v(1, 2, 3);
-//         std::cout << "Eigen测试成功" << std::endl;
-
-//         // 2. 然后测试OpenCV
-//         std::cout << "测试OpenCV..." << std::endl;
-//         // cv::Mat testMat(100, 100, CV_8UC3, cv::Scalar(0, 0, 255));
-//         std::cout << "OpenCV测试成功" << std::endl;
-
-//         // 3. 最后测试PCL
-//         std::cout << "测试PCL..." << std::endl;
-//         // pcl::PointCloud<pcl::PointXYZI>::Ptr currentCloud;
-//         // currentCloud.reset(new pcl::PointCloud<pcl::PointXYZI>);
-//         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-
-//         pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Point Cloud Viewer"));
-
-//         // viewer.reset(new pcl::visualization::PCLVisualizer("Point Cloud"));
-//         std::cout << "PCL测试成功" << std::endl;
-
-        
-
-//     } catch (const std::exception& e) {
-//         std::cerr << "捕获到异常: " << e.what() << std::endl;
-//         return -1;
-//     }
-
-//     return 0;
-// }

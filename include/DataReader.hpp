@@ -4,6 +4,7 @@
 #include <memory>
 #include <fstream>
 #include <cstddef>  // for size_t
+#include <filesystem>
 #include "SensorData.hpp"
 #include "TcpCommandHandler.hpp"
 

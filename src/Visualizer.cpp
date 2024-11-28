@@ -62,13 +62,19 @@ void PointCloudVisualizer::render() {
         std::cerr << "PointCloudVisualizer未初始化" << std::endl;
         return;
     }
+    
     if (!currentCloud->empty()) {
-        viewer->removeAllPointClouds();
-        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZI> color_handler(currentCloud, 255, 255, 255);
-        viewer->addPointCloud(currentCloud, color_handler, "cloud");
-        viewer->spinOnce(0);
+        try {
+            viewer->removeAllPointClouds();
+            pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZI> color_handler(currentCloud, 255, 255, 255);
+            viewer->addPointCloud(currentCloud, color_handler, "cloud");
+            viewer->spinOnce(1);  // 减小spinOnce的时间
+        } catch (const std::exception& e) {
+            std::cerr << "渲染点云时发生错误: " << e.what() << std::endl;
+        }
     }
     else{
+        viewer->spinOnce(1);  // 即使点云为空也需要更新视图
         std::cerr << "当前点云为空" << std::endl;
     }
 }
@@ -85,6 +91,28 @@ void PointCloudVisualizer::setBackgroundColor(float r, float g, float b) {
 void PointCloudVisualizer::setPointSize(int size) {
     viewer->setPointCloudRenderingProperties(
         pcl::visualization::PCL_VISUALIZER_POINT_SIZE, size, "cloud");
+}
+
+void PointCloudVisualizer::getJetColor(float v, uint8_t& r, uint8_t& g, uint8_t& b) {
+    float c[4];
+    if(v < -1){
+        c[0] = 0;
+        c[1] = 0;
+        c[2] = 1;
+    }
+    else if(v > 1){
+        c[0] = 1;
+        c[1] = 0;
+        c[2] = 0;
+    }
+    else{
+        c[0] = 0;
+        c[1] = 1;
+        c[2] = 0;
+    }
+    r = static_cast<uint8_t>(c[0] * 255);
+    g = static_cast<uint8_t>(c[1] * 255);
+    b = static_cast<uint8_t>(c[2] * 255);
 }
 
 //==============================================================================

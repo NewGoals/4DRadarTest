@@ -1,19 +1,4 @@
-// #ifdef _WIN32
-//     #define WIN32_LEAN_AND_MEAN  // 避免包含多余的Windows头文件
-//     #include <WinSock2.h>
-//     #include <WS2tcpip.h>
-//     #pragma comment(lib, "ws2_32.lib")
-// #else
-//     #include <sys/socket.h>
-//     #include <netinet/in.h>
-//     #include <arpa/inet.h>
-//     #include <unistd.h>
-// #endif
-
-#include <iostream>
 #include "DataReader.hpp"
-#include <opencv2/opencv.hpp>
-#include <filesystem>
 
 //==============================================================================
 // FileReader 基类实现

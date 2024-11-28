@@ -14,24 +14,16 @@
     #endif
 #endif
 
-// 标准库
 #include <memory>
 #include <unordered_map>
 #include <string>
-
-// Eigen
-#define EIGEN_NO_DEBUG  // 禁用调试信息
-#define EIGEN_USE_BLAS  // 如果使用BLAS，确保定义
-#include <Eigen/Dense>
-
-// OpenCV 头文件
-#include <opencv2/opencv.hpp>
 
 // PCL放在最后
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
+// 数据结构头文件，其中包含opencv
 #include "SensorData.hpp"
 
 // 可视化基类
@@ -70,6 +62,8 @@ private:
     pcl::PointCloud<pcl::PointXYZI>::Ptr currentCloud;
     std::string windowName = "Point Cloud";
     bool initialized = false;
+
+    void getJetColor(float v, uint8_t& r, uint8_t& g, uint8_t& b);
 public:
     PointCloudVisualizer();
     void update(const std::shared_ptr<SensorData>& data) override;
