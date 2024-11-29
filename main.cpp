@@ -348,9 +348,11 @@ void testRealTimeRadarDisplay(){
         // 创建可视化器
         DisplayManager displayManager;
         displayManager.addVisualizer(DisplayManager::DisplayType::POINT_CLOUD, std::make_shared<PointCloudVisualizer>());
+        displayManager.addVisualizer(DisplayManager::DisplayType::IMAGE, std::make_shared<ImageVisualizer>());
+
         // 设置窗口布局
         displayManager.setLayout(DisplayManager::DisplayType::POINT_CLOUD, 100, 100, 800, 600);
-
+        displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 100, 700, 800, 600);
         // 启动线程
         collector.start();
 
@@ -358,6 +360,13 @@ void testRealTimeRadarDisplay(){
             std::this_thread::sleep_for(std::chrono::milliseconds(5));  // 改为5ms
             collector.printStats();
             displayManager.updateDisplay(collector.getMainSourceData());
+            // 获取从源数据 
+            auto subData = collector.getSubSourceData();
+            for(const auto& data : subData){
+                auto imageData = std::make_shared<ImageData>();
+                imageData->frame = data.second;  // 正确设置 frame
+                displayManager.updateDisplay(imageData);
+            }
             // 渲染所有可视化器
             displayManager.renderAll();
         }

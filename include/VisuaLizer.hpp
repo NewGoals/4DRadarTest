@@ -59,7 +59,7 @@ public:
 class PointCloudVisualizer : public IVisualizer {
 private:
     pcl::visualization::PCLVisualizer::Ptr viewer;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr currentCloud;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr currentCloud;
     std::string windowName = "Point Cloud";
     bool initialized = false;
 

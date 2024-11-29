@@ -150,4 +150,5 @@ private:
 public:
     void setSaveConfig(bool saveRadar, bool saveCamera);
     std::shared_ptr<RadarData> getMainSourceData() const;
+    std::vector<std::pair<size_t, cv::Mat>> getSubSourceData() const;
 };

@@ -391,3 +391,13 @@ std::shared_ptr<RadarData> SynchronizedCollector::getMainSourceData() const {
     }
     return radarData;
 }
+
+std::vector<std::pair<size_t, cv::Mat>> SynchronizedCollector::getSubSourceData() const{
+    std::vector<std::pair<size_t, cv::Mat>> data;
+    for(size_t i = 0; i < subSources.size(); ++i){
+        if(auto* videoSource = dynamic_cast<VideoSource*>(subSources[i].get())){
+            data.push_back(std::make_pair(i, videoSource->getLastFrame()));
+        }
+    }
+    return data;
+}

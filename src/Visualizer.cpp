@@ -29,7 +29,7 @@ void ImageVisualizer::render() {
 //==============================================================================
 PointCloudVisualizer::PointCloudVisualizer() {
     try{
-        currentCloud.reset(new pcl::PointCloud<pcl::PointXYZI>);
+        currentCloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
         viewer.reset(new pcl::visualization::PCLVisualizer(windowName));
         if(!viewer) throw std::runtime_error("Failed to create PCLVisualizer");
         viewer->setBackgroundColor(0, 0, 0);
@@ -47,11 +47,17 @@ void PointCloudVisualizer::update(const std::shared_ptr<SensorData>& data) {
     if (auto radarData = std::dynamic_pointer_cast<RadarData>(data)) {
         currentCloud->clear();
         for (const auto& point : radarData->points) {
-            pcl::PointXYZI p;
+            pcl::PointXYZRGB p;
             p.x = point.x;
             p.y = point.y;
             p.z = point.z;
-            p.intensity = point.v_r;
+            
+            uint8_t r, g, b;
+            getJetColor(point.v_r, r, g, b);
+            p.r = r;
+            p.g = g;
+            p.b = b;
+
             currentCloud->push_back(p);
         }
     }
@@ -62,19 +68,12 @@ void PointCloudVisualizer::render() {
         std::cerr << "PointCloudVisualizer未初始化" << std::endl;
         return;
     }
-    
     if (!currentCloud->empty()) {
-        try {
-            viewer->removeAllPointClouds();
-            pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZI> color_handler(currentCloud, 255, 255, 255);
-            viewer->addPointCloud(currentCloud, color_handler, "cloud");
-            viewer->spinOnce(1);  // 减小spinOnce的时间
-        } catch (const std::exception& e) {
-            std::cerr << "渲染点云时发生错误: " << e.what() << std::endl;
-        }
+        viewer->removeAllPointClouds();
+        viewer->addPointCloud(currentCloud, "cloud");
+        viewer->spinOnce(0);
     }
     else{
-        viewer->spinOnce(1);  // 即使点云为空也需要更新视图
         std::cerr << "当前点云为空" << std::endl;
     }
 }
