@@ -317,7 +317,6 @@ void testDisplayManager(){
 }
 
 
-
 void testRealTimeRadarDisplay(){
     try{
         SynchronizedCollector collector;
@@ -342,7 +341,7 @@ void testRealTimeRadarDisplay(){
         collector.addSource(std::move(videoSource), false);
         std::cout << "添加视频源成功" << std::endl;
 
-        // 设置保存，雷达保存，视频不保存
+        // 设置保存，(雷达，相机)
         collector.setSaveConfig(true, true);
 
         // 创建可视化器
@@ -356,10 +355,18 @@ void testRealTimeRadarDisplay(){
         // 启动线程
         collector.start();
 
+        // 采集状态信息打印间隔
+        int printInterval = 30;     // 按照雷达的采集频率
+        int count = 0;
+
         while(true){
             std::this_thread::sleep_for(std::chrono::milliseconds(5));  // 改为5ms
-            collector.printStats();
-            displayManager.updateDisplay(collector.getMainSourceData());
+            if(count % printInterval == 0){
+                collector.printStats();
+            }
+            count++;
+            auto newRadarData = collector.getMainSourceData();
+            displayManager.updateDisplay(std::move(newRadarData));
             // 获取从源数据 
             auto subData = collector.getSubSourceData();
             for(const auto& data : subData){

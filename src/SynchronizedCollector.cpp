@@ -14,13 +14,15 @@ bool VideoSource::init() {
 }
 
 bool VideoSource::capture(int64_t timestamp) {
+    std::unique_lock<std::shared_mutex> lock(dataMutex);    // 独占锁
+
     if (!reader->grabFrame()) {
         return false;
     }
 
     auto data = reader->getData();
     if (!data) return false;
-    
+
     lastFrame = std::dynamic_pointer_cast<ImageData>(data)->frame.clone();
     lastTimestamp = timestamp;  // 记录实际的采集时间戳，后续可能很少用到，该时间戳来自相机
     return true;
@@ -32,6 +34,11 @@ void VideoSource::stop() {
 
 std::string VideoSource::getSourceName() const {
     return sourceName;
+}
+
+const cv::Mat& VideoSource::getLastFrame() const{
+    std::shared_lock<std::shared_mutex> lock(dataMutex);    // 共享锁
+    return lastFrame;
 }
 
 
@@ -47,6 +54,7 @@ bool RadarSource::init() {
 }
 
 bool RadarSource::capture(int64_t timestamp) {
+    std::unique_lock<std::shared_mutex> lock(dataMutex);    // 使用独占锁
     CommandParseResult result;
     if (!handler->receiveAndParseFrame(result)) return false;
     
@@ -81,6 +89,7 @@ void RadarSource::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetI
 }
 
 std::vector<TargetInfoParse_0xA8::TargetInfo> RadarSource::getLastTargets() const {
+    std::shared_lock<std::shared_mutex> lock(dataMutex);    // 共享锁
     return lastTargets;
 }
 
@@ -107,12 +116,6 @@ void SynchronizedCollector::start() {
     isRunning = true;
     startTime = std::chrono::steady_clock::now();
     
-    // 创建基础保存目录
-    saveConfig.baseDir = "sync_data_" + getCurrentTimeString();
-    std::filesystem::create_directory(saveConfig.baseDir);
-    
-    std::cout << "创建数据保存目录: " << saveConfig.baseDir << std::endl;
-    
     // 启动主数据源线程
     captureThreads.emplace_back();
     captureThreads.back().thread = std::thread(&SynchronizedCollector::mainSourceLoop, this);
@@ -125,7 +128,15 @@ void SynchronizedCollector::start() {
 
     // 启动保存线程
     if(saveConfig.saveRadar || saveConfig.saveCamera){
+        // 创建基础保存目录
+        saveConfig.baseDir = "sync_data_" + getCurrentTimeString();
+        std::filesystem::create_directory(saveConfig.baseDir);
+        
+        std::cout << "创建数据保存目录: " << saveConfig.baseDir << std::endl;
         saveThread = std::thread(&SynchronizedCollector::saveThreadLoop, this);
+    }
+    else{
+        std::cout << "未启用保存线程" << std::endl;
     }
     
     std::cout << "所有采集线程已启动" << std::endl;
@@ -151,6 +162,9 @@ void SynchronizedCollector::mainSourceLoop() {
                 for(size_t i = 0; i < subSources.size(); ++i){
                     task.cameraFrames.push_back(std::make_pair(i, findClosestFrame(captureThreads[i + 1], timestamp)));
                 }
+
+                // 开启保存线程才添加，否则队列一直增加而无法处理
+                if(saveConfig.saveRadar || saveConfig.saveCamera)
                 {   
                     // 将保存任务添加到队列中
                     std::lock_guard<std::mutex> lock(saveMutex);
@@ -182,9 +196,8 @@ void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
                         thread.frameBuffer.pop_front();
                     }
                     // 将最新帧添加到缓存中
-                    thread.frameBuffer.push_back(
-                        std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp)
-                    );
+                    auto newFrame = std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp);
+                    thread.frameBuffer.push_back(std::move(newFrame));
                 }
             }
         }

@@ -94,12 +94,12 @@ void PointCloudVisualizer::setPointSize(int size) {
 
 void PointCloudVisualizer::getJetColor(float v, uint8_t& r, uint8_t& g, uint8_t& b) {
     float c[4];
-    if(v < -1){
+    if(v < -0.5){
         c[0] = 0;
         c[1] = 0;
         c[2] = 1;
     }
-    else if(v > 1){
+    else if(v > 0.5){
         c[0] = 1;
         c[1] = 0;
         c[2] = 0;

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
+#include <shared_mutex>
 #include "DataReaderFactory.hpp"
 
 // 数据源基类
@@ -30,6 +31,7 @@ private:
     std::string sourceName;
     int64_t lastTimestamp{0};
     cv::Mat lastFrame;  // 添加最后一帧的缓存
+    mutable std::shared_mutex dataMutex;        // 针对lastFrame的读写锁
     
 public:
     VideoSource(const std::string& videoPath, const std::string& name);
@@ -39,7 +41,7 @@ public:
     std::string getSourceName() const override;
     std::shared_ptr<VideoStreamReader> getReader() const { return reader; }
     int64_t getLastTimestamp() const override { return lastTimestamp; }
-    const cv::Mat& getLastFrame() const { return lastFrame; }
+    const cv::Mat& getLastFrame() const;
 };
 
 // 雷达数据源
@@ -49,6 +51,7 @@ private:
     std::string sourceName;
     int64_t lastTimestamp{0};
     std::vector<TargetInfoParse_0xA8::TargetInfo> lastTargets;
+    mutable std::shared_mutex dataMutex;        // 针对lastTagets的读写锁
     
 public:
     RadarSource(const std::string& ip, int port, const std::string& name);
