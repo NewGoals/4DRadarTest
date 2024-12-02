@@ -10,6 +10,26 @@ bool FileReader::init() {
                 fileList.push_back(entry.path().string());
             }
         }
+        // 自定义排序：按文件名中的数字部分排序
+        std::sort(fileList.begin(), fileList.end(), [](const std::string& a, const std::string& b) {
+            std::regex re(R"(\d+)"); // 匹配数字
+            std::smatch matchA, matchB;
+            
+            // 提取文件名部分
+            std::string fileNameA = std::filesystem::path(a).filename().string();
+            std::string fileNameB = std::filesystem::path(b).filename().string();
+
+            // 提取文件名中的数字部分
+            std::regex_search(fileNameA, matchA, re);
+            std::regex_search(fileNameB, matchB, re);
+
+            // 转换为数字比较
+            if (!matchA.empty() && !matchB.empty()) {
+                return std::stoi(matchA.str()) < std::stoi(matchB.str());
+            }
+            // 如果某个文件名中没有数字，按字典序排序
+            return a < b;
+        });
         return !fileList.empty();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
@@ -25,19 +45,30 @@ bool FileReader::isEnd() const {
 // ImageFileReader 实现
 //==============================================================================
 bool ImageFileReader::readNext() {
+    std::unique_lock<std::shared_mutex> lock(dataMutex);
     if (isEnd()) return false;
+    cv::Mat img = cv::imread(fileList[currentIndex]);
+    if(img.empty()){
+        std::cerr << "图像文件读取失败" << std::endl;
+    }
+    imageData = std::make_shared<ImageData>();
+    imageData->frame = std::move(img);
+
+    // 暂时以文件名作为同步显示依据，实际上文件名为时间差而非真实时间戳
+    std::string fileName = std::filesystem::path(fileList[currentIndex]).filename().string();
+    std::regex re(R"(\d+)");
+    std::smatch match;
+    std::regex_search(fileName, match, re);
+    imageData->timestamp = std::stoi(match.str());
+
     currentIndex++;
     return true;
 }
 
 std::shared_ptr<SensorData> ImageFileReader::getData() {
-    if (currentIndex == 0 || currentIndex > fileList.size()) {
-        return nullptr;
-    }
-    cv::Mat image = cv::imread(fileList[currentIndex - 1]);
-    auto data = std::make_shared<SensorData>();
-    // 设置图像数据
-    return data;
+    std::shared_lock<std::shared_mutex> lock(dataMutex);
+    if (!imageData) return nullptr;
+    return imageData;
 }
 
 //==============================================================================    
@@ -45,6 +76,7 @@ std::shared_ptr<SensorData> ImageFileReader::getData() {
 //==============================================================================
 /// @brief 读取下一帧雷达数据
 bool RadarFileReader::readNext() {
+    std::unique_lock<std::shared_mutex> lock(dataMutex);
     if (isEnd()) return false;
     
     // 根据文件格式选择相应的读取方法
@@ -66,6 +98,13 @@ bool RadarFileReader::readNext() {
             std::cerr << "不支持的文件格式" << std::endl;
             return false;
     }
+
+    // 设置时间戳,这里同样为时间差
+    std::string fileName = std::filesystem::path(fileList[currentIndex]).filename().string();
+    std::regex re(R"(\d+)");
+    std::smatch match;
+    std::regex_search(fileName, match, re);
+    radarData->timestamp = std::stoi(match.str());
     
     // 不管正确与否都要下一帧，防止无限循环卡死
     currentIndex++;
@@ -76,6 +115,7 @@ bool RadarFileReader::readNext() {
 /// @brief 获取当前帧雷达数据
 /// @return 当前帧雷达数据(SensorData 指针)
 std::shared_ptr<SensorData> RadarFileReader::getData() {
+    std::shared_lock<std::shared_mutex> lock(dataMutex);
     if (!radarData) return nullptr;
     return radarData;
 }
@@ -111,7 +151,7 @@ bool RadarFileReader::readCsvData() {
 
         // timestamp
         std::getline(ss, value, ',');
-        radarData->timestamp = std::stoll(value);
+        // radarData->timestamp = std::stoll(value);
 
         // type
         std::getline(ss, value, ',');

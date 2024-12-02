@@ -5,6 +5,8 @@
 #include <fstream>
 #include <cstddef>  // for size_t
 #include <filesystem>
+#include <shared_mutex>
+#include <regex>
 #include "SensorData.hpp"
 #include "TcpCommandHandler.hpp"
 
@@ -36,6 +38,10 @@ public:
 
 // 图像文件读取器
 class ImageFileReader : public FileReader {
+private:
+    std::shared_ptr<ImageData> imageData;
+    mutable std::shared_mutex dataMutex;
+
 public:
     explicit ImageFileReader(const std::string& path) : FileReader(path) {}
     bool readNext() override;
@@ -53,6 +59,7 @@ public:
 
 private:
     std::shared_ptr<RadarData> radarData;   // 当前读取的雷达数据
+    mutable std::shared_mutex dataMutex;
     bool saveEnabled = false;
     std::string savePath;
     std::ofstream outFile;  // 用于保存雷达数据的文件流

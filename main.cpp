@@ -288,23 +288,42 @@ void testDisplayManager(){
 
         // 添加可视化器
         displayManager.addVisualizer(DisplayManager::DisplayType::POINT_CLOUD, std::make_shared<PointCloudVisualizer>());
+        displayManager.addVisualizer(DisplayManager::DisplayType::IMAGE, std::make_shared<ImageVisualizer>());
         
         // 设置窗口布局
         displayManager.setLayout(DisplayManager::DisplayType::POINT_CLOUD, 100, 100, 800, 600);
 
+        displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 200, 200, 800, 600);
+
         // 从文件中读取数据
-        auto reader = DataReaderFactory::createReader(ReaderType::RADAR_FILE, "E:/dataset/radar_data_20241122/sync_data_20241122_104031/radar");
-        if (!reader->init()) {
+        auto radar_reader = DataReaderFactory::createReader(ReaderType::RADAR_FILE, "E:/dataset/radar_data_20241129/sync_data_20241129_151458/radar");
+        if (!radar_reader->init()) {
             std::cerr << "初始化读取器失败" << std::endl;
             return;
         }
 
+        auto image_reader = DataReaderFactory::createReader(ReaderType::IMAGE_FILE, "E:\\dataset\\radar_data_20241129\\sync_data_20241129_151458\\camera");
+        if (!image_reader->init()) {
+            std::cerr << "初始化读取器失败" << std::endl;
+            return;
+        }
+        
         // 读取数据
-        while (!reader->isEnd()) {
-            if (reader->readNext()) {
-                displayManager.updateDisplay(reader->getData());
+        image_reader->readNext();
+        while (!radar_reader->isEnd()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));  // 改为5ms
+            if (radar_reader->readNext()) {
+
+                displayManager.updateDisplay(radar_reader->getData());
+                if(std::dynamic_pointer_cast<ImageFileReader>(image_reader)->getData()->timestamp < std::dynamic_pointer_cast<RadarFileReader>(radar_reader)->getData()->timestamp){
+                    while(std::dynamic_pointer_cast<ImageFileReader>(image_reader)->getData()->timestamp < std::dynamic_pointer_cast<RadarFileReader>(radar_reader)->getData()->timestamp){
+                        image_reader->readNext();
+                    }
+                }
+                else{
+                    displayManager.updateDisplay(image_reader->getData());
+                }   
                 displayManager.renderAll();
-                if (cv::waitKey(1) == 'q') break;
             }
         }
     }
@@ -312,8 +331,6 @@ void testDisplayManager(){
     {
         std::cerr << "testDisplayManager 异常: " << e.what() << '\n';
     }
-    
-    
 }
 
 
@@ -333,8 +350,9 @@ void testRealTimeRadarDisplay(){
         // 添加从视频源
         // auto videoSource = std::make_unique<VideoSource>(
         //     "E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera");
-        auto videoSource = std::make_unique<VideoSource>(
-            "rtsp://127.0.0.1:8554/camera_test", "camera");
+        // auto videoSource = std::make_unique<VideoSource>(
+        //     "rtsp://127.0.0.1:8554/camera_test", "camera");
+        auto videoSource = std::make_unique<VideoSource>("rtsp://192.168.88.168:554/live/chn1/stream_1", "camera");
         if (!videoSource->init()) {
             throw std::runtime_error("视频源初始化失败");
         }
@@ -386,15 +404,6 @@ void testRealTimeRadarDisplay(){
 }
 
 
-struct InitDebug {
-    InitDebug() {
-        AllocConsole();
-        FILE* dummy;
-        freopen_s(&dummy, "CONOUT$", "w", stdout);
-        freopen_s(&dummy, "CONOUT$", "w", stderr);
-        std::cout << "全局初始化开始" << std::endl;
-    }
-} g_init_debug;
 
 int main() {
     std::cout << "程序开始运行..." << std::endl;
@@ -403,7 +412,7 @@ int main() {
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
     try {
-        testRealTimeRadarDisplay();
+        testDisplayManager();
     } catch (const std::exception& e) {
         std::cerr << "程序异常: " << e.what() << std::endl;
         return -1;

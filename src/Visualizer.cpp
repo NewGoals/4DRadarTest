@@ -5,7 +5,7 @@
 //==============================================================================
 ImageVisualizer::ImageVisualizer() {
     try{
-        cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
+        cv::namedWindow(windowName, cv::WINDOW_NORMAL);
     } catch (const std::runtime_error& e) {
         std::cerr << "Error in ImageVisualizer::init: " << e.what() << std::endl;
     }
@@ -28,6 +28,23 @@ void ImageVisualizer::render() {
 // PointCloudVisualizer 实现
 //==============================================================================
 PointCloudVisualizer::PointCloudVisualizer() {
+    // 在构造函数中预先计算网格线
+    for (int i = 0; i < 11; ++i) {
+        float x = -25.0f + i * 5.0f;
+        float y = -25.0f + i * 5.0f;
+        
+        // 垂直线
+        gridLines.push_back({
+            pcl::PointXYZ(x, -25.0f, 0),
+            pcl::PointXYZ(x, 25.0f, 0)
+        });
+        
+        // 水平线
+        gridLines.push_back({
+            pcl::PointXYZ(-25.0f, y, 0),
+            pcl::PointXYZ(25.0f, y, 0)
+        });
+    }
     try{
         currentCloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
         viewer.reset(new pcl::visualization::PCLVisualizer(windowName));
@@ -35,6 +52,23 @@ PointCloudVisualizer::PointCloudVisualizer() {
         viewer->setBackgroundColor(0, 0, 0);
         viewer->addCoordinateSystem(1.0);
         viewer->initCameraParameters();
+
+        // 添加网格
+        for (size_t i = 0; i < gridLines.size(); ++i) {
+            viewer->addLine(
+                gridLines[i].first, 
+                gridLines[i].second, 
+                0.5, 0.5, 0.5, 
+                "grid_line_" + std::to_string(i)
+            );
+        }
+
+        // 设置相机视角
+        viewer->setCameraPosition(
+            0.0, -50.0, 50.0,   // 相机位置 (x, y, z)
+            0.0, 0.0, 0.0,      // 观察目标点 
+            0.0, 0.0, 1.0       // 上方向向量
+        );
 
         initialized = true;
     } catch (const std::runtime_error& e) {
@@ -68,14 +102,16 @@ void PointCloudVisualizer::render() {
         std::cerr << "PointCloudVisualizer未初始化" << std::endl;
         return;
     }
+
     if (!currentCloud->empty()) {
         viewer->removeAllPointClouds();
         viewer->addPointCloud(currentCloud, "cloud");
-        viewer->spinOnce(0);
     }
-    else{
+    else {
         std::cerr << "当前点云为空" << std::endl;
     }
+    
+    viewer->spinOnce(0);
 }
 
 void PointCloudVisualizer::setWindowLayout(int x, int y, int width, int height) {

@@ -103,7 +103,7 @@ private:
         std::atomic<int64_t> lastCaptureTime{0};
         std::atomic<int> frameCount{0};
         std::deque<std::unique_ptr<ImageFrame>> frameBuffer;  // 添加帧缓冲
-        mutable std::mutex bufferMutex;
+        mutable std::mutex bufferMutex;     // 主要防止相机线程的写入和雷达线程的读取和修改冲突
         const size_t MAX_BUFFER_SIZE = 60;  // 最大缓冲帧数
 
         // 删除复制构造函数和赋值运算符
@@ -135,7 +135,6 @@ private:
     std::atomic<bool> isRunning{false};
     std::chrono::steady_clock::time_point startTime;
     std::chrono::steady_clock::time_point lastFrameTime;
-    static constexpr std::chrono::milliseconds FRAME_INTERVAL{33}; // 约30fps
     // 保存参数
     SavaConfig saveConfig;
     std::queue<SaveTask> saveQueue;

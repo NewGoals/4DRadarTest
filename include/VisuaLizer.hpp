@@ -62,6 +62,7 @@ private:
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr currentCloud;
     std::string windowName = "Point Cloud";
     bool initialized = false;
+    std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> gridLines;
 
     void getJetColor(float v, uint8_t& r, uint8_t& g, uint8_t& b);
 public:
