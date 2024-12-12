@@ -4,7 +4,9 @@
 //==============================================================================
 // 0xa8 命令解析类实现
 //==============================================================================
-bool TargetInfoParse_0xA8::parse(const uint8_t* data, size_t length) {
+bool TargetInfoParse_0xA8::parse(const ProtocolFrame& frame) {
+    size_t length = frame.data.size();
+    const uint8_t* data = frame.data.data();
     if (length < 4) {
         std::cerr << "【错误】A8命令数据长度不足以包含目标个数" << std::endl;
         return false;
@@ -27,23 +29,46 @@ bool TargetInfoParse_0xA8::parse(const uint8_t* data, size_t length) {
 
     // 解析每个目标的数据
     const uint8_t* ptr = data + 4;  // 跳过目标个数字段
-    for (size_t i = 0; i < targetCount; ++i) {
-        TargetInfo target;
-        
-        // 解析目标数据
-        memcpy(&target.type, ptr, 4);
-        memcpy(&target.x_axes, ptr + 4, 4);
-        memcpy(&target.y_axes, ptr + 8, 4);
-        memcpy(&target.z_axes, ptr + 12, 4);
-        memcpy(&target.rangIdx, ptr + 16, 4);
-        memcpy(&target.speed, ptr + 20, 4);
-        memcpy(&target.peakVal, ptr + 24, 4);
-        memcpy(&target.dopplerIdx, ptr + 28, 4);
-        memcpy(&target.aoa_snr, ptr + 32, 4);
+    if(Protocol::autoTimestamp){
+        for (size_t i = 0; i < targetCount; ++i) {
+            TargetInfo target;
+            
+            // 解析目标数据
+            memcpy(&target.type, ptr, 4);
+            memcpy(&target.x_axes, ptr + 4, 4);
+            memcpy(&target.y_axes, ptr + 8, 4);
+            memcpy(&target.z_axes, ptr + 12, 4);
+            memcpy(&target.rangIdx, ptr + 16, 4);
+            memcpy(&target.speed, ptr + 20, 4);
+            memcpy(&target.peakVal, ptr + 24, 4);
+            memcpy(&target.dopplerIdx, ptr + 28, 4);
+            memcpy(&target.aoa_snr, ptr + 32, 4);
 
-        targets.push_back(target);
-        ptr += 36;  // 移动到下一个目标数据
+            targets.push_back(target);
+            ptr += 36;  // 移动到下一个目标数据
+        }
     }
+    else{
+        for (size_t i = 0; i < targetCount; ++i) {
+            TargetInfo target;
+            
+            // 解析目标数据
+            memcpy(&target.type, ptr, 4);
+            memcpy(&target.x_axes, ptr + 4, 4);
+            memcpy(&target.y_axes, ptr + 8, 4);
+            memcpy(&target.z_axes, ptr + 12, 4);
+            memcpy(&target.rangIdx, ptr + 16, 4);
+            memcpy(&target.speed, ptr + 20, 4);
+            memcpy(&target.peakVal, ptr + 24, 4);
+            memcpy(&target.dopplerIdx, ptr + 28, 4);
+            memcpy(&target.aoa_snr, ptr + 32, 4);
+            target.timestamp = frame.timestamp;
+
+            targets.push_back(target);
+            ptr += 36;  // 移动到下一个目标数据
+        }
+    }
+    
 
     return true;
 }
@@ -78,6 +103,14 @@ uint8_t Protocol::calculateChecksum(const uint8_t* data, size_t len) {
 
     return static_cast<uint8_t>(sum & 0xFF);  // 取最后一个字节（相当于对256求余）
     // return 0xff;
+}
+
+uint64_t Protocol::littleEndian2Uint64(const uint8_t* data) {
+    uint64_t result = 0;
+    for (int i = 0; i < 8; ++i) {
+        result |= static_cast<uint64_t>(data[i]) << (i * 8);
+    }
+    return result;
 }
 
 std::vector<uint8_t> Protocol::packFrame(uint8_t srcAddr, uint8_t destAddr, 
@@ -126,26 +159,48 @@ bool Protocol::parseFrame(const uint8_t* data, size_t len, ProtocolFrame& frame)
     uint16_t dataLen = frame.header.lengthLow | (frame.header.lengthHigh << 8);
     
     // 检查总长度
-    if (len != HEADER_SIZE + dataLen + 1) {
-        // std::cout << "【解析失败】数据长度不匹配" << std::endl;
-        return false;
+    if(!autoTimestamp){
+        if (len != HEADER_SIZE + dataLen + 1) {
+            // std::cout << "【解析失败】数据长度不匹配(无时间戳)" << std::endl;
+            return false;
+        }
     }
+    else{
+        if (len != HEADER_SIZE + dataLen + 1 + sizeof(uint64_t)){
+            // std::cout << "【解析失败】数据长度不匹配(带时间戳)" << std::endl;
+            // std::cout << "src_data_len: " << HEADER_SIZE + dataLen + 1 << std::endl;
+            // std::cout << "real_len: " << len << std::endl;
+            return false;
+        }
+    }
+    
     
     // 复制数据
     frame.data.assign(data + HEADER_SIZE, data + HEADER_SIZE + dataLen);
     
-    // 获取校验和
-    frame.checksum = data[len - 1];
+    // 获取校验和，获取时间戳
+    if(!autoTimestamp){
+        frame.checksum = data[len - 1];
+    }
+    else{
+        frame.checksum = data[len - 1 - 8];
+        uint8_t* littleEndiantTimestamp = new uint8_t[sizeof(uint64_t)];
+        memcpy(littleEndiantTimestamp, data + len - sizeof(uint64_t), sizeof(uint64_t));
+        frame.timestamp = littleEndian2Uint64(littleEndiantTimestamp);
+        delete littleEndiantTimestamp;
+    }
     
     // 如果校验和为0xff, 则不进行校验
     if (frame.checksum == 0xff) {
+        // std::cout << "校验成功" << std::endl;
         return true;
     }
 
     uint8_t calculatedChecksum = calculateChecksum(data, len - 1);
     if (calculatedChecksum != frame.checksum) {
-        std::cout << "【校验详情】计算值: 0x" << std::hex << static_cast<int>(calculatedChecksum) 
-                  << " 接收值: 0x" << static_cast<int>(frame.checksum) << std::endl;
+        std::cout << "帧解析失败" << std::endl;
+        // std::cout << "【校验详情】计算值: 0x" << std::hex << static_cast<int>(calculatedChecksum) 
+        //           << " 接收值: 0x" << static_cast<int>(frame.checksum) << std::endl;
     }
     return calculatedChecksum == frame.checksum;
 }
@@ -157,7 +212,7 @@ bool Protocol::parseCommandData(const ProtocolFrame& frame, CommandParseResult& 
         case CommandCode::TARGET_INFO:
         {
             auto cmdParser = std::make_unique<TargetInfoParse_0xA8>();
-            if (cmdParser && cmdParser->parse(frame.data.data(), frame.data.size())) {
+            if (cmdParser && cmdParser->parse(frame)) {
                 // cmdParser->print();
                 result = cmdParser->getTargets();
                 return true;
@@ -391,9 +446,17 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
                 if (dataSize < 1) {
                     return false;
                 }
-                parseBuffer.push_back(recvBuffer[dataStart]);
-                dataStart++;
-                dataSize--;                
+                if(!Protocol::autoTimestamp){
+                    parseBuffer.push_back(recvBuffer[dataStart]);
+                    dataStart++;
+                    dataSize--;    
+                }
+                else{
+                    parseBuffer.insert(parseBuffer.end(), 
+                                     recvBuffer.begin() + dataStart,
+                                     recvBuffer.begin() + dataStart + 1 + 8);
+                }
+                            
 
                 if (Protocol::parseFrame(parseBuffer.data(), parseBuffer.size(), frame)) {
                     // std::cout << "【校验成功】帧解析完成" << std::endl;
@@ -497,6 +560,9 @@ void TcpCommandHandler::stopRecording() {
 void TcpCommandHandler::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets) {
     if (!isRecording || !dataFile.is_open()) return;
     
+    // 计算耗时
+    auto start = std::chrono::high_resolution_clock::now();
+
     for (const auto& target : targets) {
         dataFile << recordStartTime << ","
                 << target.type << ","
@@ -509,5 +575,10 @@ void TcpCommandHandler::saveTargetData(const std::vector<TargetInfoParse_0xA8::T
                 << target.dopplerIdx << ","
                 << target.aoa_snr << "\n";
     }
+
+    auto end = std::chrono::high_resolution_clock::now(); // 记录结束时间
+    std::chrono::duration<double, std::milli> elapsed = end - start; // 计算时间差，改为毫秒级
+    
+    std::cout << "点云数量" << targets.size() << ", 写入耗时: " << elapsed.count() << " ms" << std::endl; // 输出写入耗时
     dataFile.flush();
 }

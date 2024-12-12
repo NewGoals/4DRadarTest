@@ -119,77 +119,77 @@ void printHex(const std::vector<uint8_t>& data) {
 //     std::cout << "已断开连接" << std::endl;
 // }
 
-// // 测试雷达 
-// void testRadar() {
-//     try {
-//         // 创建命令处理器
-//         TcpCommandHandler handler("192.168.10.117", 50000);
+// 测试雷达 
+void testRadar() {
+    try {
+        // 创建命令处理器
+        TcpCommandHandler handler("192.168.53.168", 12345);
         
-//         // 创建保存目录
-//         std::string saveDir = "radar_data";
-//         if (!std::filesystem::exists(saveDir)) {
-//             std::filesystem::create_directory(saveDir);
-//         }
+        // 创建保存目录
+        std::string saveDir = "radar_data";
+        if (!std::filesystem::exists(saveDir)) {
+            std::filesystem::create_directory(saveDir);
+        }
         
-//         // 连接雷达
-//         if (!handler.connect()) {
-//             std::cerr << "无法连接到雷达设备" << std::endl;
-//             return;
-//         }
-//         std::cout << "成功连接到雷达设备" << std::endl;
+        // 连接雷达
+        if (!handler.connect()) {
+            std::cerr << "无法连接到雷达设备" << std::endl;
+            return;
+        }
+        std::cout << "成功连接到雷达设备" << std::endl;
 
-//         // 主循环
-//         int count = 0;
-//         const int totalFrames = 200;
-//         const int printInterval = 10;  // 每10帧打印一次
-//         auto lastTime = std::chrono::steady_clock::now();
-//         auto lastPrintTime = std::chrono::steady_clock::now();
+        // 主循环
+        int count = 0;
+        const int totalFrames = 200;
+        const int printInterval = 10;  // 每10帧打印一次
+        auto lastTime = std::chrono::steady_clock::now();
+        auto lastPrintTime = std::chrono::steady_clock::now();
         
-//         while (count < totalFrames) {
-//             CommandParseResult result;
-//             if (handler.receiveAndParseFrame(result)) {
-//                 if (auto* targets = std::get_if<std::vector<TargetInfoParse_0xA8::TargetInfo>>(&result)) {
-//                     // 生成时间戳文件名
-//                     auto now = std::chrono::system_clock::now();
-//                     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-//                         now.time_since_epoch()).count();
-//                     std::string filename = saveDir + "/radar_" + std::to_string(timestamp) + ".csv";
+        while (count < totalFrames) {
+            CommandParseResult result;
+            if (handler.receiveAndParseFrame(result)) {
+                if (auto* targets = std::get_if<std::vector<TargetInfoParse_0xA8::TargetInfo>>(&result)) {
+                    // 生成时间戳文件名
+                    auto now = std::chrono::system_clock::now();
+                    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now.time_since_epoch()).count();
+                    std::string filename = saveDir + "/radar_" + std::to_string(timestamp) + ".csv";
                     
-//                     // 保存当前帧数据
-//                     if (handler.startRecording(filename)) {
-//                         // std::cout << "保存帧数据到: " << filename << std::endl;
-//                         // std::cout << "接收到目标数量: " << targets->size() << std::endl;
-//                         handler.saveTargetData(*targets);
-//                         handler.stopRecording();
-//                     }
+                    // 保存当前帧数据
+                    if (handler.startRecording(filename)) {
+                        std::cout << "保存帧数据到: " << filename << std::endl;
+                        std::cout << "接收到目标数量: " << targets->size() << std::endl;
+                        handler.saveTargetData(*targets);
+                        handler.stopRecording();
+                    }
                     
-//                     // 每隔一定帧数才打印进度
-//                     if (count % printInterval == 0) {
-//                         auto now = std::chrono::steady_clock::now();
-//                         auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
-//                             now - lastPrintTime).count();
-//                         lastPrintTime = now;
+                    // 每隔一定帧数才打印进度
+                    if (count % printInterval == 0) {
+                        auto now = std::chrono::steady_clock::now();
+                        auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now - lastPrintTime).count();
+                        lastPrintTime = now;
                         
-//                         float progress = (count + 1) * 100.0f / totalFrames;
-//                         std::cout << "\r采集进度: " << std::fixed << std::setprecision(1) 
-//                                   << progress << "% (" << (count + 1) << "/" << totalFrames 
-//                                   << "), 平均采集间隔: " << interval / printInterval << "ms" 
-//                                   << std::flush;  // 使用\r和std::flush实现原地更新
-//                     }
-//                 }
-//                 count++;
-//             }
-//             std::this_thread::sleep_for(std::chrono::milliseconds(10));
-//         }
-//         std::cout << std::endl;  // 完成后换行
+                        float progress = (count + 1) * 100.0f / totalFrames;
+                        std::cout << "\r采集进度: " << std::fixed << std::setprecision(1) 
+                                  << progress << "% (" << (count + 1) << "/" << totalFrames 
+                                  << "), 平均采集间隔: " << interval / printInterval << "ms" 
+                                  << std::flush;  // 使用\r和std::flush实现原地更新
+                    }
+                }
+                count++;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        std::cout << std::endl;  // 完成后换行
         
-//         handler.disconnect();
-//         std::cout << "测试完成，已断开连接" << std::endl;
+        handler.disconnect();
+        std::cout << "测试完成，已断开连接" << std::endl;
         
-//     } catch (const std::exception& e) {
-//         std::cerr << "雷达测试异常: " << e.what() << std::endl;
-//     }
-// }
+    } catch (const std::exception& e) {
+        std::cerr << "雷达测试异常: " << e.what() << std::endl;
+    }
+}
 
 // void testMultiSourceCapture() {
 //     try {
@@ -233,52 +233,52 @@ void printHex(const std::vector<uint8_t>& data) {
 //     }
 // }
 
-// void testRadarFileReader() {
-//     std::cout << "开始测试雷达数据读取..." << std::endl;
+void testRadarFileReader() {
+    std::cout << "开始测试雷达数据读取..." << std::endl;
     
-//     // 创建雷达数据读取器
-//     auto reader = DataReaderFactory::createReader(
-//         ReaderType::RADAR_FILE,
-//         "E:/dataset/radar_data_20241122/sync_data_20241122_104031/radar"  // 雷达数据文件夹路径
-//     );
+    // 创建雷达数据读取器
+    auto reader = DataReaderFactory::createReader(
+        ReaderType::RADAR_FILE,
+        "E:/dataset/radar_data_20241211/sync_data_20241211_151805/camera"  // 雷达数据文件夹路径
+    );
     
-//     if (!reader) {
-//         std::cerr << "创建读取器失败" << std::endl;
-//         return;
-//     }
+    if (!reader) {
+        std::cerr << "创建读取器失败" << std::endl;
+        return;
+    }
     
-//     // 初始化读取器
-//     if (!reader->init()) {
-//         std::cerr << "初始化读取器失败" << std::endl;
-//         return;
-//     }
+    // 初始化读取器
+    if (!reader->init()) {
+        std::cerr << "初始化读取器失败" << std::endl;
+        return;
+    }
     
-//     // 读取并打印数据
-//     int frameCount = 0;
-//     while (!reader->isEnd() && frameCount < 100) {  // 读取10帧数据
-//         if (reader->readNext()) {
-//             auto data = std::dynamic_pointer_cast<RadarData>(reader->getData());
-//             if (data) {
-//                 std::cout << "帧 " << frameCount 
-//                          << " 时间戳: " << data->timestamp
-//                          << " 点数: " << data->points.size() << std::endl;
+    // 读取并打印数据
+    int frameCount = 0;
+    while (!reader->isEnd() && frameCount < 100) {  // 读取10帧数据
+        if (reader->readNext()) {
+            auto data = std::dynamic_pointer_cast<RadarData>(reader->getData());
+            if (data) {
+                std::cout << "帧 " << frameCount 
+                         << " 时间戳: " << data->timestamp
+                         << " 点数: " << data->points.size() << std::endl;
                 
-//                 // 打印第一个点的数据（如果有）
-//                 if (!data->points.empty()) {
-//                     const auto& p = data->points[0];
-//                     std::cout << "第一个点: x=" << p.x 
-//                              << ", y=" << p.y 
-//                              << ", z=" << p.z 
-//                              << ", rcs=" << p.rcs 
-//                              << ", v_r=" << p.v_r << std::endl;
-//                 }
-//             }
-//             frameCount++;
-//         }
-//     }
+                // 打印第一个点的数据（如果有）
+                if (!data->points.empty()) {
+                    const auto& p = data->points[0];
+                    std::cout << "第一个点: x=" << p.x 
+                             << ", y=" << p.y 
+                             << ", z=" << p.z 
+                             << ", rcs=" << p.rcs 
+                             << ", v_r=" << p.v_r << std::endl;
+                }
+            }
+            frameCount++;
+        }
+    }
     
-//     std::cout << "测试完成，共读取 " << frameCount << " 帧数据" << std::endl;
-// }
+    std::cout << "测试完成，共读取 " << frameCount << " 帧数据" << std::endl;
+}
 
 void testDisplayManager(){
     try
@@ -293,16 +293,16 @@ void testDisplayManager(){
         // 设置窗口布局
         displayManager.setLayout(DisplayManager::DisplayType::POINT_CLOUD, 100, 100, 800, 600);
 
-        displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 200, 200, 800, 600);
+        displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 150, 400, 800, 600);
 
         // 从文件中读取数据
-        auto radar_reader = DataReaderFactory::createReader(ReaderType::RADAR_FILE, "E:/dataset/radar_data_20241129/sync_data_20241129_151458/radar");
+        auto radar_reader = DataReaderFactory::createReader(ReaderType::RADAR_FILE, "E:/dataset/radar_data_20241211/sync_data_20241211_152007/radar");
         if (!radar_reader->init()) {
             std::cerr << "初始化读取器失败" << std::endl;
             return;
         }
 
-        auto image_reader = DataReaderFactory::createReader(ReaderType::IMAGE_FILE, "E:\\dataset\\radar_data_20241129\\sync_data_20241129_151458\\camera");
+        auto image_reader = DataReaderFactory::createReader(ReaderType::IMAGE_FILE, "E:/dataset/radar_data_20241211/sync_data_20241211_152007/camera");
         if (!image_reader->init()) {
             std::cerr << "初始化读取器失败" << std::endl;
             return;
@@ -340,7 +340,7 @@ void testRealTimeRadarDisplay(){
         std::cout << "创建采集器成功" << std::endl;
         
         // 添加主数据源（雷达）
-        auto radarSource = std::make_unique<RadarSource>("192.168.10.117", 50000, "radar");
+        auto radarSource = std::make_unique<RadarSource>("192.168.88.219", 12345, "radar");
         if (!radarSource->init()) {
             throw std::runtime_error("雷达初始化失败");
         }
@@ -352,7 +352,7 @@ void testRealTimeRadarDisplay(){
         //     "E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera");
         // auto videoSource = std::make_unique<VideoSource>(
         //     "rtsp://127.0.0.1:8554/camera_test", "camera");
-        auto videoSource = std::make_unique<VideoSource>("rtsp://192.168.88.168:554/live/chn1/stream_1", "camera");
+        auto videoSource = std::make_unique<VideoSource>("rtsp://192.168.88.219:554/live/chn1/stream_1", "camera");
         if (!videoSource->init()) {
             throw std::runtime_error("视频源初始化失败");
         }
@@ -369,7 +369,7 @@ void testRealTimeRadarDisplay(){
 
         // 设置窗口布局
         displayManager.setLayout(DisplayManager::DisplayType::POINT_CLOUD, 100, 100, 800, 600);
-        displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 100, 700, 800, 600);
+        displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 200, 150, 800, 600);
         // 启动线程
         collector.start();
 
@@ -404,6 +404,10 @@ void testRealTimeRadarDisplay(){
 }
 
 
+void testFfmpegRtspStream(){
+    
+}
+
 
 int main() {
     std::cout << "程序开始运行..." << std::endl;
@@ -412,7 +416,7 @@ int main() {
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
     try {
-        testDisplayManager();
+        testRealTimeRadarDisplay();
     } catch (const std::exception& e) {
         std::cerr << "程序异常: " << e.what() << std::endl;
         return -1;

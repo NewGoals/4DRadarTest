@@ -30,19 +30,19 @@ void ImageVisualizer::render() {
 PointCloudVisualizer::PointCloudVisualizer() {
     // 在构造函数中预先计算网格线
     for (int i = 0; i < 11; ++i) {
-        float x = -25.0f + i * 5.0f;
-        float y = -25.0f + i * 5.0f;
+        float x = -250.0f + i * 50.0f;
+        float y = -250.0f + i * 50.0f;
         
         // 垂直线
         gridLines.push_back({
-            pcl::PointXYZ(x, -25.0f, 0),
-            pcl::PointXYZ(x, 25.0f, 0)
+            pcl::PointXYZ(x, -250.0f, 0),
+            pcl::PointXYZ(x, 250.0f, 0)
         });
         
         // 水平线
         gridLines.push_back({
-            pcl::PointXYZ(-25.0f, y, 0),
-            pcl::PointXYZ(25.0f, y, 0)
+            pcl::PointXYZ(-250.0f, y, 0),
+            pcl::PointXYZ(250.0f, y, 0)
         });
     }
     try{

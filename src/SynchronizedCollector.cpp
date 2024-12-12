@@ -343,7 +343,7 @@ void SynchronizedCollector::printStats() {
     if (mainSource) {
         auto mainThread = &captureThreads[0];
         std::cout << "主数据源 (" << mainSource->getSourceName() << "): "
-                  << "帧数: " << mainThread->frameCount 
+                  << "帧数: " << mainThread->frameCount
                   << ", 最后采集时间: " << mainThread->lastCaptureTime << "ms" << std::endl;
     }
     
@@ -351,8 +351,8 @@ void SynchronizedCollector::printStats() {
     for (size_t i = 0; i < subSources.size(); ++i) {
         auto& thread = captureThreads[i + 1]; // +1 因为第一个是主数据源
         std::cout << "从数据源 (" << subSources[i]->getSourceName() << "): "
-                  << "总帧数: " << thread.frameCount 
-                  << ", 缓存帧数: " << thread.frameBuffer.size() 
+                  << "总帧数: " << thread.frameCount
+                  << ", 缓存帧数: " << thread.frameBuffer.size()
                   << ", 最后采集时间: " << thread.lastCaptureTime << "ms"
                   << ", 缓存利用率: " << (thread.frameBuffer.size() * 100.0 / thread.MAX_BUFFER_SIZE) << "%"
                   << std::endl;
@@ -360,8 +360,8 @@ void SynchronizedCollector::printStats() {
     
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count();
-    std::cout << "总运行时间: " << duration << "秒" 
-              << ", 雷达平均帧率: " << (captureThreads[0].frameCount / (duration ? duration : 1)) << " fps"
+    std::cout << "总运行时间: " << static_cast<int>(duration) << "秒" 
+              << ", 雷达平均帧率: " << static_cast<int>((captureThreads[0].frameCount / (duration ? duration : 1))) << " fps"
               << std::endl;
 }
 

@@ -79,6 +79,7 @@ struct ProtocolFrame {
     FrameHeader header;
     std::vector<uint8_t> data;  // 可变长数据
     uint8_t checksum;           // 校验和
+    uint64_t timestamp;          // 时间戳
 };
 #pragma pack(pop)
 
@@ -89,7 +90,7 @@ public:
     virtual ~CommandParse() = default;
     
     // 解析数据的纯虚函数
-    virtual bool parse(const uint8_t* data, size_t length) = 0;
+    virtual bool parse(const ProtocolFrame& frame) = 0;
     
     // 打印解析结果
     virtual void print() const = 0;
@@ -112,10 +113,11 @@ public:
         float peakVal;
         float dopplerIdx;
         float aoa_snr;
+        int64_t timestamp;
     };
 
     // 公共接口
-    bool parse(const uint8_t* data, size_t length) override;
+    bool parse(const ProtocolFrame& frame) override;
     void print() const override;
     uint8_t getCommandCode() const override { return 0xA8; }
 
@@ -148,9 +150,13 @@ public:
     static constexpr uint8_t FRAME_HEADER_1 = 0x5A;
     static constexpr size_t HEADER_SIZE = sizeof(FrameHeader);
     static constexpr size_t MIN_FRAME_SIZE = HEADER_SIZE + 1;  // 头部 + 校验和
+    static constexpr bool autoTimestamp = false;
 
     // 计算校验和
     static uint8_t calculateChecksum(const uint8_t* data, size_t len);
+
+    // 小端数转uint_64_t
+    static uint64_t littleEndian2Uint64(const uint8_t* data);
     
     // 打包协议帧
     static std::vector<uint8_t> packFrame(uint8_t srcAddr, uint8_t destAddr, 
