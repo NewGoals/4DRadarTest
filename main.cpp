@@ -156,10 +156,10 @@ void testRadar() {
                     std::string filename = saveDir + "/radar_" + std::to_string(timestamp) + ".csv";
                     
                     // 保存当前帧数据
-                    if (handler.startRecording(filename)) {
+                    if (handler.startRecording(filename, "csv")) {
                         std::cout << "保存帧数据到: " << filename << std::endl;
                         std::cout << "接收到目标数量: " << targets->size() << std::endl;
-                        handler.saveTargetData(*targets);
+                        handler.saveTargetData(*targets, "csv");
                         handler.stopRecording();
                     }
                     
@@ -296,13 +296,13 @@ void testDisplayManager(){
         displayManager.setLayout(DisplayManager::DisplayType::IMAGE, 150, 400, 800, 600);
 
         // 从文件中读取数据
-        auto radar_reader = DataReaderFactory::createReader(ReaderType::RADAR_FILE, "E:/dataset/radar_data_20241211/sync_data_20241211_152007/radar");
+        auto radar_reader = DataReaderFactory::createReader(ReaderType::RADAR_FILE, "E:/dataset/radar_data_20241211/sync_data_20241211_155401/radar");
         if (!radar_reader->init()) {
             std::cerr << "初始化读取器失败" << std::endl;
             return;
         }
 
-        auto image_reader = DataReaderFactory::createReader(ReaderType::IMAGE_FILE, "E:/dataset/radar_data_20241211/sync_data_20241211_152007/camera");
+        auto image_reader = DataReaderFactory::createReader(ReaderType::IMAGE_FILE, "E:/dataset/radar_data_20241211/sync_data_20241211_155401/camera");
         if (!image_reader->init()) {
             std::cerr << "初始化读取器失败" << std::endl;
             return;
@@ -315,22 +315,32 @@ void testDisplayManager(){
             if (radar_reader->readNext()) {
 
                 displayManager.updateDisplay(radar_reader->getData());
-                if(std::dynamic_pointer_cast<ImageFileReader>(image_reader)->getData()->timestamp < std::dynamic_pointer_cast<RadarFileReader>(radar_reader)->getData()->timestamp){
-                    while(std::dynamic_pointer_cast<ImageFileReader>(image_reader)->getData()->timestamp < std::dynamic_pointer_cast<RadarFileReader>(radar_reader)->getData()->timestamp){
-                        image_reader->readNext();
-                    }
+                
+                while(std::dynamic_pointer_cast<ImageFileReader>(image_reader)->getData()->timestamp < std::dynamic_pointer_cast<RadarFileReader>(radar_reader)->getData()->timestamp){
+                    image_reader->readNext();
                 }
-                else{
-                    displayManager.updateDisplay(image_reader->getData());
-                }   
+
+                displayManager.updateDisplay(image_reader->getData()); 
                 displayManager.renderAll();
             }
+            // std::this_thread::sleep_for(std::chrono::seconds(10));
         }
     }
     catch(const std::exception& e)
     {
         std::cerr << "testDisplayManager 异常: " << e.what() << '\n';
     }
+}
+
+
+void testDisplaySingleRadarPoint(){
+    std::cout << "开始测试显示管理器..." << std::endl;
+    DisplayManager displayManager;
+
+    // 添加可视化器
+    displayManager.addVisualizer(DisplayManager::DisplayType::POINT_CLOUD, std::make_shared<PointCloudVisualizer>());
+    // 设置窗口布局
+    displayManager.setLayout(DisplayManager::DisplayType::POINT_CLOUD, 100, 100, 800, 600);
 }
 
 
@@ -352,15 +362,22 @@ void testRealTimeRadarDisplay(){
         //     "E:/dataset/How Tower Cranes Build Themselves1080p.mp4", "camera");
         // auto videoSource = std::make_unique<VideoSource>(
         //     "rtsp://127.0.0.1:8554/camera_test", "camera");
-        auto videoSource = std::make_unique<VideoSource>("rtsp://192.168.88.219:554/live/chn1/stream_1", "camera");
-        if (!videoSource->init()) {
-            throw std::runtime_error("视频源初始化失败");
+        
+        // auto videoSource_near = std::make_unique<VideoSource>("rtsp://192.168.88.219:554/live/chn1/stream_1", "camera_near");
+        // if (!videoSource_near->init()) {
+        //     throw std::runtime_error("视频源1初始化失败");
+        // }
+        // collector.addSource(std::move(videoSource_near), false);
+        
+        auto videoSource_far = std::make_unique<VideoSource>("rtsp://192.168.88.219:554/live/chn0/stream_1", "camera_far");
+        if (!videoSource_far->init()) {
+            throw std::runtime_error("视频源2初始化失败");
         }
-        collector.addSource(std::move(videoSource), false);
+        collector.addSource(std::move(videoSource_far), false);
         std::cout << "添加视频源成功" << std::endl;
 
         // 设置保存，(雷达，相机)
-        collector.setSaveConfig(true, true);
+        collector.setSaveConfig(true, true, RadarFileReader::Format::BIN);
 
         // 创建可视化器
         DisplayManager displayManager;
@@ -374,7 +391,7 @@ void testRealTimeRadarDisplay(){
         collector.start();
 
         // 采集状态信息打印间隔
-        int printInterval = 30;     // 按照雷达的采集频率
+        int printInterval = 10;     // 按照雷达的采集频率
         int count = 0;
 
         while(true){
@@ -416,7 +433,8 @@ int main() {
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
     try {
-        testRealTimeRadarDisplay();
+        testDisplayManager();
+        // testRealTimeRadarDisplay();
     } catch (const std::exception& e) {
         std::cerr << "程序异常: " << e.what() << std::endl;
         return -1;

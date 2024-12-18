@@ -61,8 +61,7 @@ public:
     std::string getSourceName() const override;
     int64_t getLastTimestamp() const override { return lastTimestamp; }
 
-    void saveData(const std::string& path);     // 保存最近一帧雷达数据
-    void saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, const std::string& csv_path);  // 保存具体雷达数据
+    void saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, const std::string& csv_path, RadarFileReader::Format saveFormat);  // 保存具体雷达数据
     std::vector<TargetInfoParse_0xA8::TargetInfo> getLastTargets() const;
 };
 
@@ -80,6 +79,7 @@ private:
     struct SavaConfig{
         bool saveRadar = true;
         bool saveCamera = true;
+        RadarFileReader::Format saveFormat = RadarFileReader::Format::BIN;
         std::string baseDir;
     };
 
@@ -97,14 +97,21 @@ private:
         ImageFrame(const cv::Mat& f, int64_t ts) : frame(f.clone()), timestamp(ts) {}
     };
 
+    struct RadarFrame {
+        std::vector<TargetInfoParse_0xA8::TargetInfo> targets;
+        int64_t timestamp;
+        RadarFrame(const std::vector<TargetInfoParse_0xA8::TargetInfo>& f, int64_t ts) : targets(f), timestamp(ts) {};
+    };
+
     // 通用线程管理
     struct CaptureThread {
         std::thread thread;
         std::atomic<int64_t> lastCaptureTime{0};
         std::atomic<int> frameCount{0};
-        std::deque<std::unique_ptr<ImageFrame>> frameBuffer;  // 添加帧缓冲
+        std::deque<std::unique_ptr<ImageFrame>> imageFrameBuffer;  // 添加帧缓冲
+        std::deque<std::unique_ptr<RadarFrame>> radarFrameBuffer;  // 添加雷达缓冲
         mutable std::mutex bufferMutex;     // 主要防止相机线程的写入和雷达线程的读取和修改冲突
-        const size_t MAX_BUFFER_SIZE = 60;  // 最大缓冲帧数
+        const size_t MAX_BUFFER_SIZE = 120;  // 最大缓冲帧数
 
         // 删除复制构造函数和赋值运算符
         CaptureThread(const CaptureThread&) = delete;
@@ -140,17 +147,21 @@ private:
     std::queue<SaveTask> saveQueue;
     std::mutex saveMutex;
     std::thread saveThread;     // 保存线程
+    // 同步线程
+    std::mutex syncMutex;
+    std::thread syncThread;
 
     void mainSourceLoop();  // 主源（雷达）采集循环
     void subSourceLoop(size_t sourceIndex);  // 从源（相机）采集循环
     void saveThreadLoop();  // 保存线程循环
+    void syncThreadLoop();  // 同步线程循环
 
     int64_t getCurrentTimestamp();
     static std::string getCurrentTimeString();
-    cv::Mat findClosestFrame(CaptureThread& thread, int64_t timestamp);  // 查找最近的帧
+    cv::Mat findClosestFrame(CaptureThread& thread, int64_t timestamp, bool& radaEraseFlag);  // 查找最近的帧
 
 public:
-    void setSaveConfig(bool saveRadar, bool saveCamera);
+    void setSaveConfig(bool saveRadar, bool saveCamera, RadarFileReader::Format saveFormat);
     std::shared_ptr<RadarData> getMainSourceData() const;
     std::vector<std::pair<size_t, cv::Mat>> getSubSourceData() const;
 };

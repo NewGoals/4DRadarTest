@@ -25,6 +25,9 @@ bool VideoSource::capture(int64_t timestamp) {
 
     lastFrame = std::dynamic_pointer_cast<ImageData>(data)->frame.clone();
     lastTimestamp = timestamp;  // 记录实际的采集时间戳，后续可能很少用到，该时间戳来自相机
+
+    // std::cout << "getcurrent time: " << std::dynamic_pointer_cast<ImageData>(data)->timestamp << std::endl;
+    // std::cout << "cap time: " << timestamp << std::endl;
     return true;
 }
 
@@ -56,7 +59,10 @@ bool RadarSource::init() {
 bool RadarSource::capture(int64_t timestamp) {
     std::unique_lock<std::shared_mutex> lock(dataMutex);    // 使用独占锁
     CommandParseResult result;
-    if (!handler->receiveAndParseFrame(result)) return false;
+    if (!handler->receiveAndParseFrame(result)){
+        // std::cout << "RadarSource::capture error: hanlder->receiveAndParse. " << std::endl;
+        return false;
+    }
     
     if (auto* targets = std::get_if<std::vector<TargetInfoParse_0xA8::TargetInfo>>(&result)) {
         lastTargets = *targets;  // 保存数据到成员变量
@@ -74,17 +80,19 @@ std::string RadarSource::getSourceName() const {
     return sourceName;
 }
 
-void RadarSource::saveData(const std::string& path) {
-    handler->startRecording(path);
-    handler->saveTargetData(lastTargets);
-    handler->stopRecording();
-}
 
-void RadarSource::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, const std::string& csv_path) {
+void RadarSource::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, const std::string& path, RadarFileReader::Format saveFormat) {
     if(handler){
-        handler->startRecording(csv_path);
-        handler->saveTargetData(targets);
-        handler->stopRecording();
+        if(saveFormat == RadarFileReader::Format::CSV){
+            handler->startRecording(path, "csv");
+            handler->saveTargetData(targets, "csv");
+            handler->stopRecording();
+        }
+        else if(saveFormat == RadarFileReader::Format::BIN){
+            handler->startRecording(path, "bin");
+            handler->saveTargetData(targets, "bin");
+            handler->stopRecording();
+        }
     }
 }
 
@@ -126,7 +134,7 @@ void SynchronizedCollector::start() {
         captureThreads.back().thread = std::thread(&SynchronizedCollector::subSourceLoop, this, i);
     }
 
-    // 启动保存线程
+    // 启动保存线程， 同步线程
     if(saveConfig.saveRadar || saveConfig.saveCamera){
         // 创建基础保存目录
         saveConfig.baseDir = "sync_data_" + getCurrentTimeString();
@@ -134,6 +142,9 @@ void SynchronizedCollector::start() {
         
         std::cout << "创建数据保存目录: " << saveConfig.baseDir << std::endl;
         saveThread = std::thread(&SynchronizedCollector::saveThreadLoop, this);
+
+        // 启动同步线程
+        syncThread = std::thread(&SynchronizedCollector::syncThreadLoop, this);
     }
     else{
         std::cout << "未启用保存线程" << std::endl;
@@ -143,7 +154,7 @@ void SynchronizedCollector::start() {
 }
 
 void SynchronizedCollector::mainSourceLoop() {
-    auto& thread = captureThreads[0];
+    auto& thread = captureThreads[0];   // 主源线程
     
     while (isRunning) {
         int64_t timestamp = getCurrentTimestamp();
@@ -153,22 +164,15 @@ void SynchronizedCollector::mainSourceLoop() {
                 thread.frameCount++;
                 thread.lastCaptureTime = timestamp;
 
-                // 将雷达数据添加到保存任务中
-                SaveTask task;
-                task.timestamp = timestamp;
-                task.radarData = radarSource->getLastTargets();
-
-                // 将相机数据添加到保存任务中
-                for(size_t i = 0; i < subSources.size(); ++i){
-                    task.cameraFrames.push_back(std::make_pair(i, findClosestFrame(captureThreads[i + 1], timestamp)));
-                }
-
-                // 开启保存线程才添加，否则队列一直增加而无法处理
-                if(saveConfig.saveRadar || saveConfig.saveCamera)
-                {   
-                    // 将保存任务添加到队列中
-                    std::lock_guard<std::mutex> lock(saveMutex);
-                    saveQueue.push(std::move(task));
+                {
+                    std::lock_guard<std::mutex> lock(thread.bufferMutex);
+                    // 如果缓存已满，则删除最早的帧
+                    if (thread.radarFrameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
+                        thread.radarFrameBuffer.pop_front();
+                    }
+                    // 将最新帧添加到缓存中
+                    auto newFrame = std::make_unique<RadarFrame>(radarSource->getLastTargets(), timestamp);
+                    thread.radarFrameBuffer.push_back(std::move(newFrame));
                 }
             }
         }
@@ -192,12 +196,12 @@ void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
                 {
                     std::lock_guard<std::mutex> lock(thread.bufferMutex);
                     // 如果缓存已满，则删除最早的帧
-                    if (thread.frameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
-                        thread.frameBuffer.pop_front();
+                    if (thread.imageFrameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
+                        thread.imageFrameBuffer.pop_front();
                     }
                     // 将最新帧添加到缓存中
                     auto newFrame = std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp);
-                    thread.frameBuffer.push_back(std::move(newFrame));
+                    thread.imageFrameBuffer.push_back(std::move(newFrame));
                 }
             }
         }
@@ -237,11 +241,21 @@ void SynchronizedCollector::saveThreadLoop(){
 
         // 保存雷达数据
         if(saveConfig.saveRadar){
-            std::string dataPath = saveConfig.baseDir + "/" + mainSource->getSourceName() + "/" + mainSource->getSourceName() + "_" + std::to_string(task.timestamp) + ".csv";
-            // 这里需要调用handler的saveTargetData方法，保存task.radarData，而不能使用mainSource->saveData方法保存最近一帧数据
-            if(auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())){
-                radarSource->saveTargetData(task.radarData, dataPath);
+            if(saveConfig.saveFormat == RadarFileReader::Format::CSV){
+                std::string dataPath = saveConfig.baseDir + "/" + mainSource->getSourceName() + "/" + mainSource->getSourceName() + "_" + std::to_string(task.timestamp) + ".csv";
+                // 这里需要调用handler的saveTargetData方法，保存task.radarData，而不能使用mainSource->saveData方法保存最近一帧数据
+                if(auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())){
+                    radarSource->saveTargetData(task.radarData, dataPath, RadarFileReader::Format::CSV);
+                }
             }
+            else if(saveConfig.saveFormat == RadarFileReader::Format::BIN){
+                std::string dataPath = saveConfig.baseDir + "/" + mainSource->getSourceName() + "/" + mainSource->getSourceName() + "_" + std::to_string(task.timestamp) + ".bin";
+                // 这里需要调用handler的saveTargetData方法，保存task.radarData，而不能使用mainSource->saveData方法保存最近一帧数据
+                if(auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())){
+                    radarSource->saveTargetData(task.radarData, dataPath, RadarFileReader::Format::BIN);
+                }
+            }
+            
         }
 
         // 保存相机数据
@@ -252,35 +266,119 @@ void SynchronizedCollector::saveThreadLoop(){
                                     subSources[sourceIndex]->getSourceName() + "/" +
                                     subSources[sourceIndex]->getSourceName() + "_" + 
                                     std::to_string(task.timestamp) + ".jpg";
+
+                    // 计算耗时
+                    // auto start = std::chrono::high_resolution_clock::now();
+                    
                     cv::imwrite(framePath, frame);
+
+                    // auto end = std::chrono::high_resolution_clock::now(); // 记录结束时间
+                    // std::chrono::duration<double, std::milli> elapsed = end - start; // 计算时间差，改为毫秒级
+                    
+                    // std::cout << "图像写入耗时: " << elapsed.count() << " ms" << std::endl; // 输出写入耗时
                 }
             }
         }
     }
 }
 
+void SynchronizedCollector::syncThreadLoop(){
+    while (isRunning) {
+        // 将雷达数据添加到保存任务中
+        SaveTask task;
+        
+        // 取雷达数据时间
+        int64_t radarTimestamp;
+        {
+            auto& mainThread = captureThreads[0];
+            std::lock_guard<std::mutex> lock(mainThread.bufferMutex);
+            if (mainThread.radarFrameBuffer.empty()) {
+                // std::cout << "雷达队列缓存为空" << std::endl;
+                continue;
+            }
+            radarTimestamp = mainThread.radarFrameBuffer.front()->timestamp;
 
-cv::Mat SynchronizedCollector::findClosestFrame(CaptureThread& thread, int64_t timestamp) {
+            // 添加task
+            task.radarData = mainThread.radarFrameBuffer.front()->targets;
+            task.timestamp = radarTimestamp;
+        }
+
+        std::vector<std::pair<size_t, cv::Mat>> cameraFrames;
+        {
+            bool flag = false;
+            bool radarEraseFlag = false;
+            for(size_t i = 0; i < subSources.size(); ++i){
+                cv::Mat newImage = findClosestFrame(captureThreads[i + 1], radarTimestamp, radarEraseFlag);
+                if(!newImage.empty()){
+                    task.cameraFrames.push_back(std::make_pair(i, std::move(newImage)));
+                }
+                else if(radarEraseFlag){
+                    // 图像为空，且删除雷达数据
+                    // 去掉队首
+                    {
+                        auto& mainThread = captureThreads[0];
+                        std::lock_guard<std::mutex> lock(mainThread.bufferMutex);
+                        mainThread.radarFrameBuffer.erase(mainThread.radarFrameBuffer.begin());       
+                    }
+                    // 如果存在某一帧匹配不了，即雷达数据过时，直接退出
+                    flag = true;
+                    break;
+                }
+                else{
+                    // 等待图像更新
+                    flag = true;
+                    break;
+                }
+            }
+            if(flag){
+                // 不进行保存操作，而是等待图像更新
+                continue;
+            }
+            else{
+                // 表明同步正常，图像已添加进task，需要将雷达数据删除
+                {
+                    auto& mainThread = captureThreads[0];
+                    std::lock_guard<std::mutex> lock(mainThread.bufferMutex);
+                    mainThread.radarFrameBuffer.erase(mainThread.radarFrameBuffer.begin());       
+                }
+            }
+        }
+
+        {
+            // 将保存任务添加到队列中
+            std::lock_guard<std::mutex> lock(saveMutex);
+            saveQueue.push(std::move(task)); 
+        }
+    }
+}
+
+
+cv::Mat SynchronizedCollector::findClosestFrame(CaptureThread& thread, int64_t timestamp, bool& radarEraseFlag) {
     std::lock_guard<std::mutex> lock(thread.bufferMutex);
     
-    if (thread.frameBuffer.empty()) {
-        std::cout << "当前帧缓存为空" << std::endl;
+    if (thread.imageFrameBuffer.empty()) {
+        // std::cout << "当前帧缓存为空" << std::endl;
         return cv::Mat();
     }
     
     static const int64_t MAX_TIME_DIFF = 50;  // 50ms容忍度
     static const size_t MAX_BUFFER_RETAIN = 10;  // 保留最近的帧数
-    size_t closestIndex = 0;
+    size_t closestIndex = -1;
     int64_t minDiff = (std::numeric_limits<int64_t>::max)();    // 初始化最小差值为最大整数值
     int64_t prevDiff = (std::numeric_limits<int64_t>::max)();
+    bool returnFlag = false;
     
     // 找到最接近的帧，不论是之前还是之后的
-    for (size_t i = 0; i < thread.frameBuffer.size(); ++i) {
-        auto& currentFrame = thread.frameBuffer[i];
+    // std::cout << "current image buffer size: " << thread.imageFrameBuffer.size() << std::endl;
+    for (size_t i = 0; i < thread.imageFrameBuffer.size(); ++i) {
+        auto& currentFrame = thread.imageFrameBuffer[i];
         int64_t diff = std::abs(currentFrame->timestamp - timestamp);
 
         // 如果差值开始变大，则停止搜索
-        if (diff > prevDiff) break;
+        if (diff > prevDiff){
+            returnFlag = true;
+            break;   
+        }
 
         if (diff < minDiff) {
             minDiff = diff;
@@ -289,35 +387,36 @@ cv::Mat SynchronizedCollector::findClosestFrame(CaptureThread& thread, int64_t t
         prevDiff = diff;
     }
 
-    // 如果没有找到合适的帧
-    if (minDiff > MAX_TIME_DIFF) {
-        // 只保留最近的几帧，避免完全清空缓冲区
-        if (thread.frameBuffer.size() > MAX_BUFFER_RETAIN) {
-            thread.frameBuffer.erase(
-                thread.frameBuffer.begin(), 
-                thread.frameBuffer.begin() + (thread.frameBuffer.size() - MAX_BUFFER_RETAIN)
-            );
-        }
+    // 如果没有找到合适的帧（证明此时退出原因为差值逐渐增加退出，且队列中的图像要比雷达数据更新，这里不做任何操作，直接返回等待雷达数据）
+    if (minDiff > MAX_TIME_DIFF && returnFlag) {
+        // 此时雷达数据已经过时，应该丢弃雷达数据，保存图像数据
+        radarEraseFlag = true;
         return cv::Mat();
     }
-
-    // 删除已找到的帧之前的所有帧
-    thread.frameBuffer.erase(
-        thread.frameBuffer.begin(), 
-        thread.frameBuffer.begin() + closestIndex
-    );
-
-    // 如果找到的帧在容忍范围内，则返回
-    if (!thread.frameBuffer.empty()) {
-        auto closestFramePtr = std::move(thread.frameBuffer.front());
-        if (std::abs(closestFramePtr->timestamp - timestamp) <= MAX_TIME_DIFF) {
-            // 直接移动返回，避免克隆
-            cv::Mat result = std::move(closestFramePtr->frame);
-            thread.frameBuffer.erase(thread.frameBuffer.begin());
-            return result;
+    else if (minDiff < MAX_TIME_DIFF && returnFlag)
+    {
+        // 未遍历完退出，正常找到对应图像帧，删除之前的图像
+        thread.imageFrameBuffer.erase(
+            thread.imageFrameBuffer.begin(), 
+            thread.imageFrameBuffer.begin() + closestIndex
+        );
+        if (!thread.imageFrameBuffer.empty()) {
+            auto closestFramePtr = std::move(thread.imageFrameBuffer.front());
+            if (std::abs(closestFramePtr->timestamp - timestamp) <= MAX_TIME_DIFF) {
+                // 直接移动返回，避免克隆
+                cv::Mat result = std::move(closestFramePtr->frame);
+                thread.imageFrameBuffer.erase(thread.imageFrameBuffer.begin());
+                return result;
+            }
         }
     }
+    else{
+        // 这一步表示遍历完成，不管有没有找到对应的图像，都应该等待图像数据更新
+        return cv::Mat();
+    }
     
+    // 一般不会到这里，但是还是调试输出
+    std::cout << "获取到的帧存在问题，为空" << std::endl;
     return cv::Mat();
 }
 
@@ -343,8 +442,19 @@ void SynchronizedCollector::printStats() {
     if (mainSource) {
         auto mainThread = &captureThreads[0];
         std::cout << "主数据源 (" << mainSource->getSourceName() << "): "
-                  << "帧数: " << mainThread->frameCount
-                  << ", 最后采集时间: " << mainThread->lastCaptureTime << "ms" << std::endl;
+                  << "总帧数: " << mainThread->frameCount
+                  << ", 缓存帧数: " << mainThread->radarFrameBuffer.size()
+                  << ", 最后采集时间: " << mainThread->lastCaptureTime << "ms"
+                  << ", 缓存利用率: " << (mainThread->radarFrameBuffer.size() * 100.0 / mainThread->MAX_BUFFER_SIZE) << "%"
+                  << std::endl;
+        {
+            std::lock_guard<std::mutex> lock(mainThread->bufferMutex);
+            if(!mainThread->radarFrameBuffer.empty()){
+               std::cout << "雷达队首：" << mainThread->radarFrameBuffer.front()->timestamp
+                      << ", 雷达队尾：" << mainThread->radarFrameBuffer.back()->timestamp
+                      << std::endl; 
+            }
+        }
     }
     
     // 打印从数据源状态
@@ -352,11 +462,21 @@ void SynchronizedCollector::printStats() {
         auto& thread = captureThreads[i + 1]; // +1 因为第一个是主数据源
         std::cout << "从数据源 (" << subSources[i]->getSourceName() << "): "
                   << "总帧数: " << thread.frameCount
-                  << ", 缓存帧数: " << thread.frameBuffer.size()
+                  << ", 缓存帧数: " << thread.imageFrameBuffer.size()
                   << ", 最后采集时间: " << thread.lastCaptureTime << "ms"
-                  << ", 缓存利用率: " << (thread.frameBuffer.size() * 100.0 / thread.MAX_BUFFER_SIZE) << "%"
+                  << ", 缓存利用率: " << (thread.imageFrameBuffer.size() * 100.0 / thread.MAX_BUFFER_SIZE) << "%"
                   << std::endl;
+        
+        {
+            std::lock_guard<std::mutex> lock(thread.bufferMutex);
+            if(!thread.imageFrameBuffer.empty()){
+               std::cout << "图像队首：" << thread.imageFrameBuffer.front()->timestamp
+                      << ", 图像队尾：" << thread.imageFrameBuffer.back()->timestamp
+                      << std::endl; 
+            }
+        }
     }
+
     
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count();
@@ -383,9 +503,10 @@ std::string SynchronizedCollector::getCurrentTimeString() {
     return ss.str();
 }
 
-void SynchronizedCollector::setSaveConfig(bool saveRadar, bool saveCamera) {
+void SynchronizedCollector::setSaveConfig(bool saveRadar, bool saveCamera, RadarFileReader::Format saveFormat) {
     saveConfig.saveRadar = saveRadar;
     saveConfig.saveCamera = saveCamera;
+    saveConfig.saveFormat = saveFormat;
 }
 
 std::shared_ptr<RadarData> SynchronizedCollector::getMainSourceData() const {

@@ -25,6 +25,8 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <sstream>
+#include <iomanip>
 
 
 // 命令码枚举定义
@@ -224,7 +226,7 @@ private:
     size_t expectedDataLen;  // 预期数据长度
 
     // 添加接收缓冲区
-    static constexpr size_t RECV_BUFFER_SIZE = 40960;
+    static constexpr size_t RECV_BUFFER_SIZE = 81920;
     std::vector<uint8_t> recvBuffer;
     size_t dataStart = 0;  // 有效数据起始位置
     size_t dataSize = 0;   // 有效数据大小
@@ -283,10 +285,10 @@ public:
     }
 
     // 添加数据记录控制方法
-    bool startRecording(const std::string& filePath);
+    bool startRecording(const std::string& filePath, std::string type);
     void stopRecording();
     bool isDataRecording() const { return isRecording; }
-    void saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets);
+    void saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, std::string type);
 
 
 private:

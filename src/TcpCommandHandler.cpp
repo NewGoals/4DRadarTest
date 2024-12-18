@@ -368,7 +368,7 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
         }
     }
 
-    // 添加调试信息
+    // // 添加调试信息
     // std::cout << "【数据内容】";
     // for (size_t i = dataStart; i < dataStart + std::min<size_t>(dataSize, 16); ++i) {
     //     std::cout << std::hex << std::setw(2) << std::setfill('0') 
@@ -538,14 +538,24 @@ void TcpCommandHandler::asyncReceiveLoop() {
     }
 }
 
-bool TcpCommandHandler::startRecording(const std::string& filePath) {
+bool TcpCommandHandler::startRecording(const std::string& filePath, std::string type) {
     if (isRecording) return false;
     recordStartTime = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    dataFile.open(filePath, std::ios::out);
-    if (!dataFile.is_open()) return false;
-    dataFile << "timestamp,type,x,y,z,range,speed,peak,doppler,snr\n";
-    saveFilePath = filePath;
+    if(type == "csv"){
+        dataFile.open(filePath, std::ios::out);
+        if (!dataFile.is_open()) return false;
+        dataFile << "timestamp,type,x,y,z,range,speed,peak,doppler,snr\n";
+        saveFilePath = filePath;
+    }
+    else if(type == "bin"){
+        dataFile.open(filePath, std::ios::out | std::ios::binary); 
+        if (!dataFile.is_open()){
+            std::cout << "TcpCommandHandler::startRecording无法打开BIN文件" << std::endl;
+            return false; 
+        }
+    }
+    
     isRecording = true;
     return true;
 }
@@ -557,14 +567,17 @@ void TcpCommandHandler::stopRecording() {
     }
 }
 
-void TcpCommandHandler::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets) {
+void TcpCommandHandler::saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, std::string type) {
     if (!isRecording || !dataFile.is_open()) return;
     
     // 计算耗时
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (const auto& target : targets) {
-        dataFile << recordStartTime << ","
+    // auto start = std::chrono::high_resolution_clock::now();
+    
+    if(type == "csv"){
+        // 使用buffer写入
+        std::ostringstream buffer;
+        for (const auto& target : targets) {
+            buffer << recordStartTime << ","
                 << target.type << ","
                 << target.x_axes << ","
                 << target.y_axes << ","
@@ -574,11 +587,29 @@ void TcpCommandHandler::saveTargetData(const std::vector<TargetInfoParse_0xA8::T
                 << target.peakVal << ","
                 << target.dopplerIdx << ","
                 << target.aoa_snr << "\n";
-    }
+        }
 
-    auto end = std::chrono::high_resolution_clock::now(); // 记录结束时间
-    std::chrono::duration<double, std::milli> elapsed = end - start; // 计算时间差，改为毫秒级
+        // 将缓冲区内容一次性写入文件
+        dataFile << buffer.str();
+        dataFile.flush();
+    }
+    else if(type == "bin"){
+        // 预先计算总大小
+        size_t totalSize = sizeof(uint32_t) +  // 目标数量
+                        targets.size() * sizeof(TargetInfoParse_0xA8::TargetInfo);
+
+        // 写入目标数量
+        uint32_t targetCount = static_cast<uint32_t>(targets.size());
+        dataFile.write(reinterpret_cast<const char*>(&targetCount), sizeof(targetCount));
+
+        // 一次性写入所有目标数据
+        dataFile.write(reinterpret_cast<const char*>(targets.data()), 
+                    targets.size() * sizeof(TargetInfoParse_0xA8::TargetInfo));
+    }
     
-    std::cout << "点云数量" << targets.size() << ", 写入耗时: " << elapsed.count() << " ms" << std::endl; // 输出写入耗时
-    dataFile.flush();
+
+    // auto end = std::chrono::high_resolution_clock::now(); // 记录结束时间
+    // std::chrono::duration<double, std::milli> elapsed = end - start; // 计算时间差，改为毫秒级
+    
+    // std::cout << "点云数量" << targets.size() << ", 写入耗时: " << elapsed.count() << " ms" << std::endl; // 输出写入耗时
 }

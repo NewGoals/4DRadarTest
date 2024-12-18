@@ -125,6 +125,29 @@ bool RadarFileReader::readBinData() {
     if (!inFile) return false;
 
     // 读取二进制数据的实现...
+    radarData = std::make_shared<RadarData>();
+    
+    // 读取目标数量
+    uint32_t targetCount;
+    inFile.read(reinterpret_cast<char*>(&targetCount), sizeof(targetCount));
+
+    // 预分配vector
+    std::vector<TargetInfoParse_0xA8::TargetInfo> targets(targetCount);
+
+    // 一次性读取所有目标数据
+    inFile.read(reinterpret_cast<char*>(targets.data()), 
+                  targetCount * sizeof(TargetInfoParse_0xA8::TargetInfo));
+
+    for(const auto& target : targets){
+        RadarPoint point;
+        point.x = target.x_axes;
+        point.y = target.y_axes;
+        point.z = target.z_axes;
+        point.rcs = target.peakVal;
+        point.v_r = target.speed;
+        radarData->points.push_back(point);
+    }
+
     return true;
 }
 
