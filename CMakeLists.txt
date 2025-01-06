@@ -56,7 +56,7 @@ set(PCL_LIBRARY_DIRS "${PCL_ROOT}/lib")
 set(PCL_BINARY_DIRS "${PCL_ROOT}/bin")
 
 # 查找 PCL 包
-find_package(PCL 1.13 REQUIRED COMPONENTS common io visualization filters segmentation)
+find_package(PCL 1.13 REQUIRED COMPONENTS common io kdtree search visualization filters segmentation)
 
 # 查找 VTK 包
 find_package(VTK REQUIRED)
@@ -65,6 +65,8 @@ if (NOT VTK_FOUND)
 else()
     message(STATUS "VTK found: ${VTK_VERSION}")
 endif()
+
+message(STATUS "Eigen_LIBRARIES: ${PCL_LIBRARIES}")
 
 # OpenCV 设置
 set(OpenCV_DIR "D:/opencv481/opencv/build/x64/vc16/lib")
@@ -75,6 +77,8 @@ include_directories(
     ${OpenCV_INCLUDE_DIRS}
     "${PCL_ROOT}/3rdParty/Eigen/eigen3"
     "${PCL_ROOT}/3rdParty/VTK/include/vtk-9.2"
+    "${PCL_ROOT}/3rdParty/Boost/include/boost-1_82"
+    "${PCL_ROOT}/3rdParty/FLANN/include"
     ${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
     ${GLUT_INCLUDE_DIR}
@@ -95,7 +99,7 @@ target_link_libraries(4DRadarTest
     SensorData
     ${PCL_LIBRARIES}
     ${OpenCV_LIBS}    # 添加 OpenCV 库
-    ${VTK_LIBRARIES}  # 链接 VTK 库
+    # ${VTK_LIBRARY}  # 链接 VTK 库
     freeglut opengl32 glu32
     glew32 OpenGL::GL
 )

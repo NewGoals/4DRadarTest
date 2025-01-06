@@ -200,7 +200,8 @@ void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
                         thread.imageFrameBuffer.pop_front();
                     }
                     // 将最新帧添加到缓存中
-                    auto newFrame = std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp);
+                    int delay_time = 600;   // 延迟设置为600ms
+                    auto newFrame = std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp - 600);
                     thread.imageFrameBuffer.push_back(std::move(newFrame));
                 }
             }
@@ -265,7 +266,7 @@ void SynchronizedCollector::saveThreadLoop(){
                     std::string framePath = saveConfig.baseDir + "/" + 
                                     subSources[sourceIndex]->getSourceName() + "/" +
                                     subSources[sourceIndex]->getSourceName() + "_" + 
-                                    std::to_string(task.timestamp) + ".jpg";
+                                    std::to_string(task.timestamp) + ".bmp";
 
                     // 计算耗时
                     // auto start = std::chrono::high_resolution_clock::now();
