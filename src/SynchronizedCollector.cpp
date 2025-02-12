@@ -69,6 +69,7 @@ bool RadarSource::capture(int64_t timestamp) {
         lastTimestamp = timestamp;
         return true;
     }
+    std::cout << "数据写入失败。" << std::endl;
     return false;
 }
 
@@ -157,28 +158,33 @@ void SynchronizedCollector::mainSourceLoop() {
     auto& thread = captureThreads[0];   // 主源线程
     
     while (isRunning) {
-        int64_t timestamp = getCurrentTimestamp();
-        
-        if (auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())) {
-            if (radarSource->capture(timestamp)) {
-                thread.frameCount++;
-                thread.lastCaptureTime = timestamp;
+        try{
+            int64_t timestamp = getCurrentTimestamp();
 
-                {
-                    std::lock_guard<std::mutex> lock(thread.bufferMutex);
-                    // 如果缓存已满，则删除最早的帧
-                    if (thread.radarFrameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
-                        thread.radarFrameBuffer.pop_front();
+            if (auto* radarSource = dynamic_cast<RadarSource*>(mainSource.get())) {
+                if (radarSource->capture(timestamp)) {
+                    thread.frameCount++;
+                    thread.lastCaptureTime = timestamp;
+
+                    {
+                        std::lock_guard<std::mutex> lock(thread.bufferMutex);
+                        // 如果缓存已满，则删除最早的帧
+                        if (thread.radarFrameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
+                            thread.radarFrameBuffer.pop_front();
+                        }
+                        // 将最新帧添加到缓存中
+                        auto newFrame = std::make_unique<RadarFrame>(radarSource->getLastTargets(), timestamp);
+                        thread.radarFrameBuffer.push_back(std::move(newFrame));
                     }
-                    // 将最新帧添加到缓存中
-                    auto newFrame = std::make_unique<RadarFrame>(radarSource->getLastTargets(), timestamp);
-                    thread.radarFrameBuffer.push_back(std::move(newFrame));
                 }
             }
+        }catch (const std::exception& e) {
+            std::cerr << "Exception caught in mainSourceLoop: " << e.what() << std::endl;
         }
         
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    std::cout << "主源线程退出。 " << std::endl;
 }
 
 void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
@@ -186,29 +192,34 @@ void SynchronizedCollector::subSourceLoop(size_t sourceIndex) {
     auto& thread = captureThreads[sourceIndex + 1];
     
     while (isRunning) {
-        int64_t timestamp = getCurrentTimestamp();
-        
-        if (auto* videoSource = dynamic_cast<VideoSource*>(source.get())) {
-            if (videoSource->capture(timestamp)) {
-                thread.frameCount++;
-                thread.lastCaptureTime = timestamp;
-                
-                {
-                    std::lock_guard<std::mutex> lock(thread.bufferMutex);
-                    // 如果缓存已满，则删除最早的帧
-                    if (thread.imageFrameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
-                        thread.imageFrameBuffer.pop_front();
+        try{
+            int64_t timestamp = getCurrentTimestamp();
+            
+            if (auto* videoSource = dynamic_cast<VideoSource*>(source.get())) {
+                if (videoSource->capture(timestamp)) {
+                    thread.frameCount++;
+                    thread.lastCaptureTime = timestamp;
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(thread.bufferMutex);
+                        // 如果缓存已满，则删除最早的帧
+                        if (thread.imageFrameBuffer.size() >= thread.MAX_BUFFER_SIZE) {
+                            thread.imageFrameBuffer.pop_front();
+                        }
+                        // 将最新帧添加到缓存中
+                        int delay_time = 600;   // 延迟设置为600ms
+                        auto newFrame = std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp - 600);
+                        thread.imageFrameBuffer.push_back(std::move(newFrame));
                     }
-                    // 将最新帧添加到缓存中
-                    int delay_time = 600;   // 延迟设置为600ms
-                    auto newFrame = std::make_unique<ImageFrame>(videoSource->getLastFrame(), timestamp - 600);
-                    thread.imageFrameBuffer.push_back(std::move(newFrame));
                 }
             }
+        }catch (const std::exception& e) {
+            std::cerr << "Exception caught in mainSourceLoop: " << e.what() << std::endl;
         }
         
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    std::cout << "从源线程退出。" << std::endl;
 }
 
 void SynchronizedCollector::saveThreadLoop(){
@@ -266,7 +277,7 @@ void SynchronizedCollector::saveThreadLoop(){
                     std::string framePath = saveConfig.baseDir + "/" + 
                                     subSources[sourceIndex]->getSourceName() + "/" +
                                     subSources[sourceIndex]->getSourceName() + "_" + 
-                                    std::to_string(task.timestamp) + ".bmp";
+                                    std::to_string(task.timestamp) + ".jpg";
 
                     // 计算耗时
                     // auto start = std::chrono::high_resolution_clock::now();

@@ -112,6 +112,36 @@ bool RadarFileReader::readNext() {
     return success;
 }
 
+std::vector<TargetInfoParse_0xA8::TargetInfo> RadarFileReader::readNext_0xA8(){
+    std::unique_lock<std::shared_mutex> lock(dataMutex);
+    std::vector<TargetInfoParse_0xA8::TargetInfo> targets;
+    if (isEnd()) return targets;
+    
+    // 根据文件格式选择相应的读取方法
+    Format currentFormat = (format == Format::AUTO) ? 
+        detectFormat(fileList[currentIndex]) : format;
+
+    // 打印雷达文件
+    // std::cout << "读取雷达文件: " << fileList[currentIndex] << std::endl;
+        
+    bool success = false;
+    switch (currentFormat) {
+        case Format::BIN:
+            targets = readBinData_0xA8();
+            break;
+        case Format::CSV:
+            // success = readCsvData();
+            break;
+        default:
+            std::cerr << "不支持的文件格式" << std::endl;
+            return targets;
+    }
+
+    // 不管正确与否都要下一帧，防止无限循环卡死
+    currentIndex++;
+    return targets;
+}
+
 /// @brief 获取当前帧雷达数据
 /// @return 当前帧雷达数据(SensorData 指针)
 std::shared_ptr<SensorData> RadarFileReader::getData() {
@@ -149,6 +179,28 @@ bool RadarFileReader::readBinData() {
     }
 
     return true;
+}
+
+std::vector<TargetInfoParse_0xA8::TargetInfo> RadarFileReader::readBinData_0xA8(){
+    std::ifstream inFile(fileList[currentIndex], std::ios::binary);
+    std::vector<TargetInfoParse_0xA8::TargetInfo> targets;
+
+    if (!inFile) return targets;
+
+    // 读取二进制数据的实现...
+    radarData = std::make_shared<RadarData>();
+    
+    // 读取目标数量
+    uint32_t targetCount;
+    inFile.read(reinterpret_cast<char*>(&targetCount), sizeof(targetCount));
+
+    // 预分配vector
+    targets.resize(targetCount);
+
+    // 一次性读取所有目标数据
+    inFile.read(reinterpret_cast<char*>(targets.data()), 
+                  targetCount * sizeof(TargetInfoParse_0xA8::TargetInfo));
+    return targets;
 }
 
 /// @brief 读取原始CSV格式雷达数据

@@ -14,12 +14,19 @@ bool TargetInfoParse_0xA8::parse(const ProtocolFrame& frame) {
 
     // 解析目标个数 N (小端存储)
     targetCount = (data[3] << 8) | data[2];  // 只使用低两字节
+    std::cout << "targetCount: " <<int(targetCount) << std::endl;
+    // std::cout << "first point type: " << int(data[4]) << std::endl;
     
     // 验证数据长度是否正确 (M = 1 + N*36)
     size_t expectedLen = 4 + targetCount * 36;  // 4字节目标个数 + N个目标数据
+    
+    // 进行参数长度验证
     if (length != expectedLen) {
-        std::cerr << "【错误】A8命令数据长度不匹配 预期:" << expectedLen 
+        std::cout << std::hex;
+        std::cout << "【错误】A8命令数据长度不匹配 预期:" << expectedLen 
                   << " 实际:" << length << std::endl;
+        std::cout << std::dec;
+
         return false;
     }
 
@@ -142,53 +149,48 @@ std::vector<uint8_t> Protocol::packFrame(uint8_t srcAddr, uint8_t destAddr,
 
 bool Protocol::parseFrame(const uint8_t* data, size_t len, ProtocolFrame& frame) {
     if (len < MIN_FRAME_SIZE) {
-        // std::cout << "【解析失败】数据长度不足" << std::endl;
+        std::cout << "【解析失败】数据长度不足" << std::endl;
         return false;
     }
     
     // 检查帧头
     if (data[0] != FRAME_HEADER_0 || data[1] != FRAME_HEADER_1) {
-        // std::cout << "【解析失败】帧头错误" << std::endl;
+        std::cout << "【解析失败】帧头错误" << std::endl;
         return false;
     }
     
     // 复制头部数据
     memcpy(&frame.header, data, HEADER_SIZE);
+
+    // const uint8_t* header_ptr = reinterpret_cast<const uint8_t*>(&frame.header);
+    // for (size_t i = 0; i < sizeof(frame.header); ++i) {
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') 
+    //               << static_cast<int>(header_ptr[i]) << " ";
+    // }
+    // std::cout << std::dec << std::endl;
     
-    // 获取数据长度
+    // 获取帧信息中包含的数据长度,这里和参数长度保持一致，为2字节
     uint16_t dataLen = frame.header.lengthLow | (frame.header.lengthHigh << 8);
+    size_t targetCount = (data[10] << 8) | data[9];  // 只使用低两字节
+    // 获取实际数据长度，这里必须要使用2个字节以上的范围，即不可使用uint16，使得可以表示2000个点，70000以上大小的数据
+    size_t expect_datalen = 4 + targetCount * 36;
+    // std::cout << "expect_targetlen: " << targetCount << std::endl;
+    // std::cout << "expect_datalen: " << expect_datalen << std::endl;
     
-    // 检查总长度
-    if(!autoTimestamp){
-        if (len != HEADER_SIZE + dataLen + 1) {
-            // std::cout << "【解析失败】数据长度不匹配(无时间戳)" << std::endl;
-            return false;
-        }
-    }
-    else{
-        if (len != HEADER_SIZE + dataLen + 1 + sizeof(uint64_t)){
-            // std::cout << "【解析失败】数据长度不匹配(带时间戳)" << std::endl;
-            // std::cout << "src_data_len: " << HEADER_SIZE + dataLen + 1 << std::endl;
-            // std::cout << "real_len: " << len << std::endl;
-            return false;
-        }
-    }
+    // 这里没必要验证参数长度是否与计算长度相等，因为只要数量超过了2字节的范围，验证总是失效的
+    // if (len != HEADER_SIZE + dataLen + 1) {
+    //     std::cout << "【解析失败】数据长度不匹配" << std::endl;
+    //     return false;
+    // }
     
     
     // 复制数据
-    frame.data.assign(data + HEADER_SIZE, data + HEADER_SIZE + dataLen);
+    // frame.data.assign(data + HEADER_SIZE, data + HEADER_SIZE + dataLen);
+    frame.data.assign(data + HEADER_SIZE, data + HEADER_SIZE + expect_datalen);
     
-    // 获取校验和，获取时间戳
-    if(!autoTimestamp){
-        frame.checksum = data[len - 1];
-    }
-    else{
-        frame.checksum = data[len - 1 - 8];
-        uint8_t* littleEndiantTimestamp = new uint8_t[sizeof(uint64_t)];
-        memcpy(littleEndiantTimestamp, data + len - sizeof(uint64_t), sizeof(uint64_t));
-        frame.timestamp = littleEndian2Uint64(littleEndiantTimestamp);
-        delete littleEndiantTimestamp;
-    }
+    // 获取校验和
+    frame.checksum = data[len - 1];
+
     
     // 如果校验和为0xff, 则不进行校验
     if (frame.checksum == 0xff) {
@@ -198,7 +200,7 @@ bool Protocol::parseFrame(const uint8_t* data, size_t len, ProtocolFrame& frame)
 
     uint8_t calculatedChecksum = calculateChecksum(data, len - 1);
     if (calculatedChecksum != frame.checksum) {
-        std::cout << "帧解析失败" << std::endl;
+        std::cout << "【校验失败】校验和不相等，帧解析失败" << std::endl;
         // std::cout << "【校验详情】计算值: 0x" << std::hex << static_cast<int>(calculatedChecksum) 
         //           << " 接收值: 0x" << static_cast<int>(frame.checksum) << std::endl;
     }
@@ -333,15 +335,17 @@ bool TcpCommandHandler::sendFrame(uint8_t type, uint8_t address,
 }
 
 bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
-    const size_t THRESHOLD = RECV_BUFFER_SIZE * 3 / 4;
+    const size_t THRESHOLD = RECV_BUFFER_SIZE * 2 / 4;
 
+    // std::cout << "dataStart: " << dataStart << ", dataSize: " << dataSize << std::endl;
+    // std::cout << "recvBuffer Size: " << recvBuffer.size() << std::endl;
     // 数据移动（缓冲区管理优化）
     if (dataStart + dataSize > THRESHOLD) {
         if (dataSize > 0) {
             std::memmove(recvBuffer.data(), recvBuffer.data() + dataStart, dataSize);
         }
         dataStart = 0;
-        // std::cout << "【缓冲区重置】移动数据后, dataStart: 0, dataSize: " << dataSize << std::endl;
+        std::cout << "【缓冲区重置】移动数据后, dataStart: 0, dataSize: " << dataSize << std::endl;
     }
 
     // 接收新数据
@@ -350,10 +354,10 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
         ssize_t received = tcpClient->read(recvBuffer.data() + dataStart + dataSize, freeSpace);
         if (received > 0) {
             dataSize += received;
-            // std::cout << "【接收数据】新接收: " << std::dec << received 
-            //           << " bytes, 当前缓冲区大小: " << dataSize << std::endl;
+            std::cout << "【接收数据】新接收: " << std::dec << received 
+                      << " bytes, 当前缓冲区大小: " << dataSize << std::endl;
         } else if (received == 0) {
-            // std::cerr << "【警告】对端已关闭连接。" << std::endl;
+            std::cerr << "【警告】对端已关闭连接。" << std::endl;
             return false;
         } else if (received < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
             char errMsg[256];
@@ -363,7 +367,7 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
             strncpy(errMsg, strerror(errno), sizeof(errMsg) - 1);
             errMsg[sizeof(errMsg) - 1] = '\0';
 #endif
-            // std::cerr << "【错误】读取数据失败: " << errMsg << std::endl;
+            std::cerr << "【错误】读取数据失败: " << errMsg << std::endl;
             return false;
         }
     }
@@ -401,11 +405,24 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
                 dataStart++;
                 dataSize--;
 
-                if (parseBufCount == Protocol::HEADER_SIZE) {
-                    FrameHeader* header = reinterpret_cast<FrameHeader*>(parseBuffer.data());
-                    expectedDataLen = header->lengthLow | (header->lengthHigh << 8);
+                // 此处需要继续验证data部分的前四个字节，防止因为点数过多而使得参数长度大小大于2个字节，导致获取点数不全
+                // if (parseBufCount == Protocol::HEADER_SIZE) {
+                if (parseBufCount == Protocol::HEADER_SIZE + 4) {
+                    std::vector<uint8_t> header_data(parseBuffer.begin(), parseBuffer.end() - 4);
+                    FrameHeader* header = reinterpret_cast<FrameHeader*>(header_data.data());
+                    size_t paramLength = header->lengthLow | (header->lengthHigh << 8);
                     
+                    std::vector<uint8_t> targetCount_data(parseBuffer.end() - 4, parseBuffer.end());
+                    size_t targetCount = (targetCount_data[3] << 8) | targetCount_data[2];  // 只使用低两字节
+                    expectedDataLen = 4 + targetCount * 36;
+
+                    // std::cout << std::hex;
+                    // std::cout << "【帧头解析完成】预检验参数长度 预期:" << paramLength 
+                    //         << " 实际:" << expectedDataLen << std::endl;
+                    // std::cout << std::dec;
+
                     // std::cout << "【帧头解析完成】预期总长度: " << (Protocol::HEADER_SIZE + expectedDataLen + 1) << std::endl;
+                    // std::cout << "【帧头解析完成】预期点云个数: " << targetCount << std::endl;
 
                     parseState = ParseFrameState::FRAME_DATA;
                 }
@@ -418,7 +435,7 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
                 //           << " 字节"<< std::endl;
 
                 // 剩余需要解析的数据量
-                size_t remainingData = expectedDataLen;
+                size_t remainingData = expectedDataLen - 4;
 
                 if (dataSize < remainingData + 1) {  // +1 是因为校验和占一个字节   
                     // std::cout << "【解析状态】数据不足，等待更多数据" << std::endl;
@@ -446,18 +463,12 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
                 if (dataSize < 1) {
                     return false;
                 }
-                if(!Protocol::autoTimestamp){
-                    parseBuffer.push_back(recvBuffer[dataStart]);
-                    dataStart++;
-                    dataSize--;    
-                }
-                else{
-                    parseBuffer.insert(parseBuffer.end(), 
-                                     recvBuffer.begin() + dataStart,
-                                     recvBuffer.begin() + dataStart + 1 + 8);
-                }
+                
+                parseBuffer.push_back(recvBuffer[dataStart]);
+                dataStart++;
+                dataSize--;    
+                
                             
-
                 if (Protocol::parseFrame(parseBuffer.data(), parseBuffer.size(), frame)) {
                     // std::cout << "【校验成功】帧解析完成" << std::endl;
                     resetParser();
@@ -517,11 +528,13 @@ void TcpCommandHandler::resetParser() {
                 recvBuffer[i + 1] == Protocol::FRAME_HEADER_1) {
                 dataSize = (dataStart + dataSize) - i;  // 修正计算方式
                 dataStart = i;
+                // std::cout << "resetParser: 剩余数据中找到帧头，修正计算方式" << std::endl;
                 return;
             }
         }
         // 如果没找到帧头，保留最后两个字节，因为它们可能是下一个帧的开始
         if (dataSize > 2) {
+            std::cout << "resetParser: 未找到帧头，保留最后两个字节" << std::endl;
             dataSize = 2;
             dataStart = dataStart + dataSize - 2;
         }

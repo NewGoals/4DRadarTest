@@ -67,6 +67,7 @@ private:
     
     // 内部辅助方法
     bool readBinData();
+    std::vector<TargetInfoParse_0xA8::TargetInfo> readBinData_0xA8();
     bool readCsvData();
     Format detectFormat(const std::string& filename);
 
@@ -75,6 +76,7 @@ public:
         : FileReader(path), format(fmt) {}
     
     bool readNext() override;
+    std::vector<TargetInfoParse_0xA8::TargetInfo> readNext_0xA8();
     std::shared_ptr<SensorData> getData() override;
     
     // 保存相关方法
