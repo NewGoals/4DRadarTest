@@ -1,115 +1,135 @@
+#pragma once
+
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <iostream>
 #include <filesystem>
+#include <algorithm>
+#include "SensorData.hpp"
+#include "DataReaderFactory.hpp"
+#include "DisplayManager.hpp" // 其中既有eigen又有opencv
+#include "InferenceModel.hpp"
 
 namespace fs = std::filesystem;
 
-bool calibrateCameraFromImages(const std::string& folder_path, cv::Size board_size, float square_size, cv::Mat& camera_matrix, cv::Mat& dist_coeffs) {
-    std::vector<cv::String> image_paths;
-    for (const auto& entry : fs::directory_iterator(folder_path)) {
-        if (entry.path().extension() == ".jpg" || entry.path().extension() == ".bmp") {
-            image_paths.push_back(entry.path().string());
-        }
-    }
 
-    if (image_paths.empty()) {
-        std::cerr << "未找到任何图片文件！" << std::endl;
-        return false;
-    }
+bool calibrateCameraFromImages(const std::string &folder_path, cv::Size board_size, float square_size, cv::Mat &camera_matrix, cv::Mat &dist_coeffs);
+// 外参标定
+std::vector<cv::Mat> calib();
 
-    std::vector<std::vector<cv::Point2f>> image_points;
-    std::vector<std::vector<cv::Point3f>> object_points;
+//==============================================================================
+// 通用映射类
+//==============================================================================
+class RadarImageMapper
+{
+private:
+    cv::Mat camera_matrix_; // 相机内参矩阵
+    cv::Mat dist_coeffs_;   // 畸变系数
+    cv::Mat rvec_;          // 旋转向量
+    cv::Mat tvec_;          // 平移向量
 
-    // 生成棋盘格的三维坐标
-    std::vector<cv::Point3f> obj;
-    for (int i = 0; i < board_size.height; ++i) {
-        for (int j = 0; j < board_size.width; ++j) {
-            obj.push_back(cv::Point3f(j * square_size, i * square_size, 0));
-        }
-    }
+    bool isValidPoint(const RadarPoint &pt);
 
-    // 检测棋盘格角点
-    for (const auto& path : image_paths) {
-        cv::Mat image = cv::imread(path, cv::IMREAD_GRAYSCALE);
+public:
+    // 初始化标定参数
+    bool init(const std::string &calib_file, const std::string &extrinsic_file);
+    void setExtrinsicParam(cv::Mat rvec, cv::Mat tvec);
+    // 生成深度掩膜（包含深度信息）
+    cv::Mat createDepthMask(const std::vector<RadarPoint> &radar_points,
+                            const cv::Size &image_size,
+                            float max_depth = 300.0f,
+                            bool use_nearest = true);
+    // 计算框的深度值（取区域中心点附近区域的平均深度）
+    float calculateBoxDepth(const cv::Rect& box, const cv::Mat& depth_mask);
+    // 根据检测框和深度估算物体尺寸
+    cv::Vec3f estimateObjectSize(const cv::Rect& box, float depth, int class_id);
+    // 添加立方体
+    void addBoundingBoxToViewer(pcl::visualization::PCLVisualizer::Ptr viewer,
+        const cv::Point3f& center,
+        const cv::Vec3f& size,
+        const std::string& id);
+    // 渲染检测物
+    void visualizeDetections(pcl::visualization::PCLVisualizer::Ptr viewer,const std::vector<InferenceModel::DetectionResult>& results,const cv::Mat& depth_mask); 
+    // 图像投影
+    cv::Mat mapperProject(const std::vector<RadarPoint> &radar_points,
+        cv::Mat &image);
+    // 坐标转换：图像坐标到雷达坐标
+    cv::Point3f imageToRadar(const cv::Point2f &image_point, float depth);
+};
 
-        
-        std::vector<cv::Point2f> corners;
+//==============================================================================
+// 显示控制类
+//==============================================================================
+void projectRadarPoints(const std::vector<RadarPoint> &radar_points,
+                        cv::Mat &image,
+                        const cv::Mat &camera_matrix,
+                        const cv::Mat &dist_coeffs,
+                        const cv::Mat &rvec,
+                        const cv::Mat &tvec);
 
-        bool found = cv::findChessboardCorners(image, board_size, corners);
-        if (found) {
-            cv::cornerSubPix(image, corners, cv::Size(11, 11), cv::Size(-1, -1),
-                             cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 30, 0.1));
-            image_points.push_back(corners);
-            object_points.push_back(obj);
-        }
-    }
+class CalibRadarVisualizer
+{
+private:
+    cv::Mat camera_matrix_, dist_coeffs_;
+    cv::Mat rvec_, tvec_, source_rvec, source_tvec;
+    std::shared_ptr<RadarFileReader> radar_reader_;
+    std::shared_ptr<ImageFileReader> image_reader_;
+    DisplayManager display_manager_;
+    pcl::visualization::PCLVisualizer::Ptr viewer_;
+    pcl::visualization::PCLVisualizer::Ptr viewer_source_;
 
-    if (image_points.empty()) {
-        std::cerr << "未检测到有效的棋盘格角点！" << std::endl;
-        return false;
-    }
+    //映射操作
+    YOLOv6ONNX model = YOLOv6ONNX(L"E:/Source/4DRadarTest/models/last_ckpt.onnx");
+    RadarImageMapper mapper;
+    std::vector<InferenceModel::DetectionResult> results;
+    cv::Mat depthMask;
 
-    // 进行相机标定
-    std::vector<cv::Mat> rvecs, tvecs;
-    double rms = cv::calibrateCamera(object_points, image_points, cv::Size(image_points[0][0].x, image_points[0][0].y),
-                                     camera_matrix, dist_coeffs, rvecs, tvecs);
+    // DBSCAN parameters with default values
+    float eps_ = 0.5;
+    int min_pts_ = 5;
 
-    std::cout << "标定完成，重投影误差: " << rms << std::endl;
-    std::cout << "相机内参矩阵:\n" << camera_matrix << std::endl;
-    std::cout << "畸变系数:\n" << dist_coeffs << std::endl;
+    // GUI controls
+    bool pause_ = true;
+    bool params_changed_ = false;
 
-    // 保存内参矩阵和畸变系数到文件
-    cv::FileStorage fs("camera_calibration.yml", cv::FileStorage::WRITE);
-    if (fs.isOpened()) {
-        fs << "camera_matrix" << camera_matrix;
-        fs << "dist_coeffs" << dist_coeffs;
-        fs.release();
-        std::cout << "内参矩阵和畸变系数已保存到 camera_calibration.yml" << std::endl;
-    } else {
-        std::cerr << "无法保存内参矩阵和畸变系数！" << std::endl;
-        return false;
-    }
+    struct ExtrinsicParams
+    {
+        double rx = 0, ry = 0, rz = 0; // rotation in degrees
+        double tx = 0, ty = 0, tz = 0; // translation in meters
+    } extrinsic_params_;
 
-    // 验证图像
-    for (const auto& path : image_paths) {
-        cv::Mat image = cv::imread(path, cv::IMREAD_GRAYSCALE);
-        // 获取原始图像的尺寸
-        int original_width = image.cols;
-        int original_height = image.rows;
+    // 重置外参到初始值
+    void resetExtrinsicParams();
 
-        // 计算缩放后的尺寸
-        int new_width = original_width / 4;  // 宽度缩小
-        int new_height = original_height / 4; // 高度缩小
+    // 保存当前外参到文件
+    void saveExtrinsicParams();
 
-        // // 缩放图像
-        // cv::Mat resized_image;
-        // cv::resize(image, resized_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+    // 键盘回调函数
+    void keyboardCallback(const pcl::visualization::KeyboardEvent &event, void *);
 
-        // 校正图像
-        cv::Mat undistorted_image;
-        cv::undistort(image, undistorted_image, camera_matrix, dist_coeffs);
+    void initializeVisualizers();
 
-        // 显示原始图像和校正后的图像
-        cv::Mat resized_image;
-        cv::Mat resized_undistorted_image;
+    // 创建控制面板
+    void createControlPanel();
 
-        // 调整原始图像大小
-        cv::resize(image, resized_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+    void updateExtrinsicParams();
 
-        // 调整校正后的图像大小
-        cv::resize(undistorted_image, resized_undistorted_image, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+    // 刷新当前帧
+    void processCurrentFrame();
 
-        // 创建一个空白图像用于存放拼接后的结果
-        cv::Mat combined_image;
+    // 跳转下一帧
+    void processNextFrame();
 
-        // 上下拼接两张图像
-        cv::vconcat(resized_image, resized_undistorted_image, combined_image);
+    void processRadarData(const std::shared_ptr<RadarData> &radar_data);
 
-        // 显示拼接后的图像
-        cv::imshow("Original vs Undistorted", combined_image);
-        cv::waitKey(0);
-    }
-    
-    return true;
-}
+    void processImageData(const std::shared_ptr<ImageData> &image_data,
+                          const std::shared_ptr<RadarData> &radar_data);
+
+public:
+    CalibRadarVisualizer(const std::string &calib_file,
+                         const std::string &extrinsic_file,
+                         const std::string &radar_path,
+                         const std::string &image_path);
+
+    void run();
+};

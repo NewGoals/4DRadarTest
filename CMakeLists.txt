@@ -72,9 +72,19 @@ message(STATUS "Eigen_LIBRARIES: ${PCL_LIBRARIES}")
 set(OpenCV_DIR "D:/opencv481/opencv/build/x64/vc16/lib")
 find_package(OpenCV REQUIRED)
 
+# 配置 ONNX Runtime
+set(ONNXRUNTIME_ROOT "E:/Source/4DRadarTest/3rd/onnxruntime-win-x64-1.20.1")  # 修改为你的 ONNX Runtime 安装路径
+set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
+set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
+# 验证 ONNX Runtime 路径
+if(NOT EXISTS ${ONNXRUNTIME_ROOT})
+    message(FATAL_ERROR "ONNX Runtime not found at ${ONNXRUNTIME_ROOT}")
+endif()
+
 
 include_directories(
     ${OpenCV_INCLUDE_DIRS}
+    ${ONNXRUNTIME_INCLUDE_DIR}
     "${PCL_ROOT}/3rdParty/Eigen/eigen3"
     "${PCL_ROOT}/3rdParty/VTK/include/vtk-9.2"
     "${PCL_ROOT}/3rdParty/Boost/include/boost-1_82"
@@ -89,16 +99,17 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # 添加源文件
 aux_source_directory(src SRC_FILES)
-add_library(SensorData ${SRC_FILES})
+add_library(sourcefile ${SRC_FILES})
 
 # 添加可执行文件
 add_executable(4DRadarTest main.cpp)
 
 # 链接库文件
 target_link_libraries(4DRadarTest 
-    SensorData
+    sourcefile
     ${PCL_LIBRARIES}
     ${OpenCV_LIBS}    # 添加 OpenCV 库
+    ${ONNXRUNTIME_LIB_DIR}/onnxruntime.lib
     # ${VTK_LIBRARY}  # 链接 VTK 库
     freeglut opengl32 glu32
     glew32 OpenGL::GL

@@ -23,7 +23,7 @@ public:
     virtual bool isEnd() const = 0;
 };
 
-// 文件读取器基类
+// 文件夹读取器基类
 class FileReader : public IDataReader {
 protected:
     std::string folderPath;

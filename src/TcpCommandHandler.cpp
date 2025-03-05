@@ -14,7 +14,7 @@ bool TargetInfoParse_0xA8::parse(const ProtocolFrame& frame) {
 
     // 解析目标个数 N (小端存储)
     targetCount = (data[3] << 8) | data[2];  // 只使用低两字节
-    std::cout << "targetCount: " <<int(targetCount) << std::endl;
+    // std::cout << "targetCount: " <<int(targetCount) << std::endl;
     // std::cout << "first point type: " << int(data[4]) << std::endl;
     
     // 验证数据长度是否正确 (M = 1 + N*36)
@@ -345,7 +345,7 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
             std::memmove(recvBuffer.data(), recvBuffer.data() + dataStart, dataSize);
         }
         dataStart = 0;
-        std::cout << "【缓冲区重置】移动数据后, dataStart: 0, dataSize: " << dataSize << std::endl;
+        // std::cout << "【缓冲区重置】移动数据后, dataStart: 0, dataSize: " << dataSize << std::endl;
     }
 
     // 接收新数据
@@ -354,8 +354,8 @@ bool TcpCommandHandler::receiveFrame(ProtocolFrame& frame) {
         ssize_t received = tcpClient->read(recvBuffer.data() + dataStart + dataSize, freeSpace);
         if (received > 0) {
             dataSize += received;
-            std::cout << "【接收数据】新接收: " << std::dec << received 
-                      << " bytes, 当前缓冲区大小: " << dataSize << std::endl;
+            // std::cout << "【接收数据】新接收: " << std::dec << received 
+            //           << " bytes, 当前缓冲区大小: " << dataSize << std::endl;
         } else if (received == 0) {
             std::cerr << "【警告】对端已关闭连接。" << std::endl;
             return false;
