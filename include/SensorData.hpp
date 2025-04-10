@@ -9,6 +9,24 @@ struct RadarPoint {
     float x, y, z;
     float rcs;
     float v_r;
+    float ana_snr;
+};
+
+// 雷达点迹数据结构
+struct RadarTrace {
+    uint32_t ID;
+    uint32_t type;
+    float x_speed;
+    float y_speed;
+    float z_speed;
+    float x_axes;
+    float y_axes;
+    float z_axes;
+    float length;
+    float azimuth_angle;
+    float elevation_angle;
+    float SNR;
+    float Peak_energy;
 };
 
 // 传感器数据基类
@@ -24,8 +42,13 @@ public:
     cv::Mat frame;
 };
 
-// 雷达数据类
+// 雷达数据点云类
 class RadarData : public SensorData {
 public:
     std::vector<RadarPoint> points;
+};
+
+class RadarTraceData : public SensorData {
+public:
+    std::vector<RadarTrace> traces;
 };

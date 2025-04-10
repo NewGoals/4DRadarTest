@@ -420,7 +420,7 @@ void testRealTimeRadarDisplay()
         std::cout << "添加视频源成功" << std::endl;
 
         // 设置保存，(雷达，相机)
-        collector.setSaveConfig(true, true, RadarFileReader::Format::BIN);
+        collector.setSaveConfig(false, false, RadarFileReader::Format::BIN);
 
         // 创建可视化器
         DisplayManager displayManager;
@@ -738,8 +738,8 @@ void testExtrinsicManualCalib(){
         // "E:/Source/4DRadarTest/build/Debug/sync_data_20250114_163251/camera_near"   // camera_path
         // "E:/Source/4DRadarTest/build/Debug/sync_data_20250227_111340/radar",    // radar_path
         // "E:/Source/4DRadarTest/build/Debug/sync_data_20250227_111340/camera_near"   // camera_path
-        "E:/dataset/manualCalib_h/radar",    // radar_path
-        "E:/dataset/manualCalib_h/camera_near"   // camera_path
+        "E:/dataset/test/radar",    // radar_path
+        "E:/dataset/test/camera_near"   // camera_path
     );
     
     visualizer.run();
@@ -892,9 +892,12 @@ int main()
         // testDBScan();
         // calib();
         // testManualCalib();
-        testExtrinsicManualCalib();
+        // testExtrinsicManualCalib();
         // addRadarFrame("E:/Source/4DRadarTest/build/Debug/sync_data_20250227_112352", 5);
         // testDetectModel();
+        // testRadarAlert();
+        // testTraceData();
+        testTraceAlertSystem();
     }
     catch (const std::exception &e)
     {

@@ -570,7 +570,7 @@ void CalibRadarVisualizer::updateExtrinsicParams()
     tvec_ = (cv::Mat_<double>(3, 1) << extrinsic_params_.tx,
              extrinsic_params_.ty,
              extrinsic_params_.tz);
-    
+
     mapper.setExtrinsicParam(rvec_, tvec_);
 
     params_changed_ = true;
@@ -627,14 +627,47 @@ void CalibRadarVisualizer::processRadarData(const std::shared_ptr<RadarData> &ra
     viewer_source_->removeAllPointClouds();
     // viewer_source_->removeAllShapes();
 
-    const float MAX_ABS_SPEED = 20.0f; // 预设最大速度绝对值
-
     // Convert radar points to PCL format
     // ?auto [input_cloud, source_cloud] = convertRadarToPCL(radar_data);
     pcl::PointCloud<pcl::PointXYZI>::Ptr input_cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr source_cloud = pcl::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+
+    // ----------------- 数据预处理 -----------------
+    const float SNR_THRESHOLD = 1.0f;   // 信噪比阈值（低于此值视为噪声）
+    const float RCS_THRESHOLD = -10.0f; // 雷达散射截面阈值（低于此值视为弱反射目标）
+    const int MIN_CLUSTER_SIZE = 5;     // 最小聚类点数（小簇视为噪声）
+    const float MAX_DISTANCE = 250.0f;  // 最大有效距离（超出此距离的目标忽略）
+    // const float MAX_ABS_SPEED = 10000.0f; // 预设最大速度绝对值
+    // 第一次遍历：统计信噪比极值 & 预过滤
+    float min_ana_snr = std::numeric_limits<float>::max();
+    float max_ana_snr = std::numeric_limits<float>::lowest();
     for (const auto &point : radar_data->points)
     {
+        // 初步过滤：距离、信噪比、RCS
+        if (std::sqrt(point.x * point.x + point.z * point.z) > MAX_DISTANCE)
+            continue;
+        if (point.ana_snr < SNR_THRESHOLD || point.rcs < RCS_THRESHOLD)
+            continue;
+
+        // 更新极值
+        min_ana_snr = std::min(min_ana_snr, point.ana_snr);
+        max_ana_snr = std::max(max_ana_snr, point.ana_snr);
+    }
+    // 处理全零或单一值的情况
+    if (min_ana_snr >= max_ana_snr)
+        max_ana_snr = min_ana_snr + 1e-6f;
+
+    std::cout << "min_ana_snr: " << min_ana_snr << std::endl;
+    std::cout << "max_ana_snr: " << max_ana_snr << std::endl;
+
+    for (const auto &point : radar_data->points)
+    {
+        // 最终过滤：应用与统计时相同的条件
+        if (std::sqrt(point.x * point.x + point.z * point.z) > MAX_DISTANCE)
+            continue;
+        if (point.ana_snr < SNR_THRESHOLD || point.rcs < RCS_THRESHOLD)
+            continue;
+
         pcl::PointXYZI p;
         p.x = point.x;
         p.y = point.y;
@@ -646,35 +679,58 @@ void CalibRadarVisualizer::processRadarData(const std::shared_ptr<RadarData> &ra
         p_rcs.y = point.y;
         p_rcs.z = point.z;
         // 计算颜色（HSV -> RGB）
-        float speed = point.v_r;
-        float abs_speed = std::min(std::abs(speed), MAX_ABS_SPEED);
-        float hue = 0.0;
+        // float speed = point.v_r;
+        // float speed = point.ana_snr;
+        // float speed = point.rcs;
+        // float abs_speed = std::min(std::abs(speed), MAX_ABS_SPEED);
+        // float hue = 0.0;
 
-        // 颜色映射规则
-        if (speed < 0)
+        // // 颜色映射规则
+        // if (speed < 0)
+        // {
+        //     // 正速度：红(0°) -> 黄(60°)
+        //     hue = 60.0f - 60.0f * (abs_speed / MAX_ABS_SPEED);
+        // }
+        // else if (speed > 0)
+        // {
+        //     // 负速度：蓝(240°) -> 青(180°)
+        //     hue = 180.0f + 60.0f * (abs_speed / MAX_ABS_SPEED);
+        // }
+        // else
+        // {
+        //     hue = 120.0f;
+        // }
+
+        // // 转换HSV到RGB
+        // cv::Mat hsv(1, 1, CV_32FC3, cv::Scalar(hue, 1.0, 1.0));
+        // cv::Mat bgr;
+        // cv::cvtColor(hsv, bgr, cv::COLOR_HSV2BGR);
+
+        // // 设置点云颜色
+        // p_rcs.r = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[2] * 255);
+        // p_rcs.g = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[1] * 255);
+        // p_rcs.b = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[0] * 255);
+
+        // 基于信噪比动态颜色映射（示例：低信噪比灰色，高信噪比彩色）
+        float normalized_snr = (point.ana_snr - min_ana_snr) / (max_ana_snr - min_ana_snr);
+        if (normalized_snr < 0.3f)
         {
-            // 正速度：红(0°) -> 黄(60°)
-            hue = 60.0f - 60.0f * (abs_speed / MAX_ABS_SPEED);
-        }
-        else if (speed > 0)
-        {
-            // 负速度：蓝(240°) -> 青(180°)
-            hue = 180.0f + 60.0f * (abs_speed / MAX_ABS_SPEED);
+            // 低信噪比：灰色
+            p_rcs.r = 100;
+            p_rcs.g = 100;
+            p_rcs.b = 100;
         }
         else
         {
-            hue = 120.0f;
+            // 高信噪比：彩虹色（Hue 0°~240°）
+            float hue = 240.0f * (1.0f - normalized_snr);
+            cv::Mat hsv(1, 1, CV_32FC3, cv::Scalar(hue, 1.0, 1.0));
+            cv::Mat bgr;
+            cv::cvtColor(hsv, bgr, cv::COLOR_HSV2BGR);
+            p_rcs.r = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[2] * 255);
+            p_rcs.g = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[1] * 255);
+            p_rcs.b = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[0] * 255);
         }
-
-        // 转换HSV到RGB
-        cv::Mat hsv(1, 1, CV_32FC3, cv::Scalar(hue, 1.0, 1.0));
-        cv::Mat bgr;
-        cv::cvtColor(hsv, bgr, cv::COLOR_HSV2BGR);
-
-        // 设置点云颜色
-        p_rcs.r = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[2] * 255);
-        p_rcs.g = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[1] * 255);
-        p_rcs.b = static_cast<uint8_t>(bgr.at<cv::Vec3f>(0, 0)[0] * 255);
         source_cloud->push_back(p_rcs);
     }
 
@@ -707,10 +763,11 @@ void CalibRadarVisualizer::processImageData(const std::shared_ptr<ImageData> &im
                        rvec_,
                        tvec_);
 
-    for (const auto& res : results) {
+    for (const auto &res : results)
+    {
         cv::rectangle(display_image, res.box, cv::Scalar(0, 255, 0), 2);
         std::string label = std::to_string(res.class_id) + ": " + std::to_string(res.confidence);
-        cv::putText(display_image, label, res.box.tl(), 
+        cv::putText(display_image, label, res.box.tl(),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
     }
     // Update display
@@ -753,7 +810,7 @@ void CalibRadarVisualizer::run()
 bool RadarImageMapper::isValidPoint(const RadarPoint &pt)
 {
     // 有效性检查（示例：速度过滤+深度范围）
-    return std::abs(pt.v_r) > 0.0f &&    // 有效速度
+    return std::abs(pt.v_r) > 0.0f &&     // 有效速度
            pt.y > 0.0f && pt.y <= 300.0f; // 深度在0-300米
 }
 
@@ -776,7 +833,8 @@ bool RadarImageMapper::init(const std::string &calib_file, const std::string &ex
     return true;
 }
 
-void RadarImageMapper::setExtrinsicParam(cv::Mat rvec, cv::Mat tvec){
+void RadarImageMapper::setExtrinsicParam(cv::Mat rvec, cv::Mat tvec)
+{
     rvec_ = rvec;
     tvec_ = tvec;
 }
@@ -962,11 +1020,11 @@ cv::Mat RadarImageMapper::mapperProject(const std::vector<RadarPoint> &radar_poi
                                         cv::Mat &image)
 {
     projectRadarPoints(radar_points,
-        image,
-        camera_matrix_,
-        dist_coeffs_,
-        rvec_,
-        tvec_);
+                       image,
+                       camera_matrix_,
+                       dist_coeffs_,
+                       rvec_,
+                       tvec_);
     return image;
 }
 
@@ -1000,4 +1058,45 @@ cv::Point3f RadarImageMapper::imageToRadar(const cv::Point2f &image_point, float
         static_cast<float>(radar_point.at<double>(0)),
         static_cast<float>(radar_point.at<double>(1)),
         static_cast<float>(radar_point.at<double>(2)));
+}
+
+std::vector<cv::Mat> RadarImageMapper::getCalibParam()
+{
+    std::vector<cv::Mat> calib_param;
+    calib_param.push_back(camera_matrix_);
+    calib_param.push_back(dist_coeffs_);
+    calib_param.push_back(rvec_);
+    calib_param.push_back(tvec_);
+    return calib_param;
+}
+
+std::vector<cv::Point2f> RadarImageMapper::radarToImage(const std::vector<cv::Point3f> &radar_points)
+{
+    // 投影3D点到图像平面
+    std::vector<cv::Point2f> image_points;
+    cv::projectPoints(radar_points, rvec_, tvec_, camera_matrix_, dist_coeffs_, image_points);
+    return image_points;
+}
+
+cv::Mat RadarImageMapper::cubeBottomMapper(cv::Mat image_res, float x_min, float y_min, float z_min, float x_max, float y_max, float z_max, float z_real)
+{
+    std::vector<cv::Point2f> image_points;
+    std::vector<cv::Point3f> radar_points = {
+        cv::Point3f(x_min, y_min, z_real),
+        cv::Point3f(x_max, y_min, z_real),
+        cv::Point3f(x_max, y_max, z_real),
+        cv::Point3f(x_min, y_max, z_real)};
+    cv::projectPoints(radar_points, rvec_, tvec_, camera_matrix_, dist_coeffs_, image_points);
+
+    if (!image_res.empty())
+    {
+        std::vector<cv::Point> corners;
+        for (const auto &ip : image_points)
+        {
+            corners.emplace_back(ip.x, ip.y);
+        }
+
+        cv::polylines(image_res, corners, true, cv::Scalar(0, 255, 0), 2);
+    }
+    return image_res;
 }

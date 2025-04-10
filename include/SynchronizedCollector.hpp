@@ -51,6 +51,8 @@ private:
     std::string sourceName;
     int64_t lastTimestamp{0};
     std::vector<TargetInfoParse_0xA8::TargetInfo> lastTargets;
+    std::vector<TargetInfoParse_0xA8::TargetTrace> lastTraces;
+    int m_modeType = -1;  // 读取数据时获取当前雷达数据输出状态
     mutable std::shared_mutex dataMutex;        // 针对lastTagets的读写锁
     
 public:
@@ -63,6 +65,10 @@ public:
 
     void saveTargetData(const std::vector<TargetInfoParse_0xA8::TargetInfo>& targets, const std::string& csv_path, RadarFileReader::Format saveFormat);  // 保存具体雷达数据
     std::vector<TargetInfoParse_0xA8::TargetInfo> getLastTargets() const;
+    std::vector<TargetInfoParse_0xA8::TargetTrace> getLastTraces() const;
+
+    void setModeType(int modeType);
+    int getModeType() const;
 };
 
 // 同步数据采集器
@@ -103,6 +109,12 @@ private:
         RadarFrame(const std::vector<TargetInfoParse_0xA8::TargetInfo>& f, int64_t ts) : targets(f), timestamp(ts) {};
     };
 
+    struct TraceFrame {
+        std::vector<TargetInfoParse_0xA8::TargetTrace> traces;
+        int64_t timestamp;
+        TraceFrame(const std::vector<TargetInfoParse_0xA8::TargetTrace>& f, int64_t ts) : traces(f), timestamp(ts) {};
+    };
+
     // 通用线程管理
     struct CaptureThread {
         std::thread thread;
@@ -110,6 +122,7 @@ private:
         std::atomic<int> frameCount{0};
         std::deque<std::unique_ptr<ImageFrame>> imageFrameBuffer;  // 添加帧缓冲
         std::deque<std::unique_ptr<RadarFrame>> radarFrameBuffer;  // 添加雷达缓冲
+        std::deque<std::unique_ptr<TraceFrame>> traceFrameBuffer;  // 添加点迹缓冲
         mutable std::mutex bufferMutex;     // 主要防止相机线程的写入和雷达线程的读取和修改冲突
         const size_t MAX_BUFFER_SIZE = 120;  // 最大缓冲帧数
 
@@ -156,12 +169,17 @@ private:
     void saveThreadLoop();  // 保存线程循环
     void syncThreadLoop();  // 同步线程循环
 
-    int64_t getCurrentTimestamp();
+    // int64_t getCurrentTimestamp();
     static std::string getCurrentTimeString();
     cv::Mat findClosestFrame(CaptureThread& thread, int64_t timestamp, bool& radaEraseFlag);  // 查找最近的帧
 
 public:
     void setSaveConfig(bool saveRadar, bool saveCamera, RadarFileReader::Format saveFormat);
+    // 以下方法均获取到最新帧的数据，但是有可能不连续。理论上来说，应该在buffer中操作，通过观察buffer来判断是否溢出丢帧。
+    int64_t getCurrentTimestamp();
     std::shared_ptr<RadarData> getMainSourceData() const;
+    std::shared_ptr<RadarTraceData> getMainSourceTraceData() const;
     std::vector<std::pair<size_t, cv::Mat>> getSubSourceData() const;
+    // buffer操作，这里会将buffer中的数据出队，因此需谨慎处理其与保存队列的逻辑。
+    std::shared_ptr<RadarTraceData> getMainSourceTraceDataFromBuffer();
 };

@@ -84,7 +84,7 @@ bool RadarFileReader::readNext() {
         detectFormat(fileList[currentIndex]) : format;
 
     // 打印雷达文件
-    std::cout << "读取雷达文件: " << fileList[currentIndex] << std::endl;
+    // std::cout << "读取雷达文件: " << fileList[currentIndex] << std::endl;
         
     bool success = false;
     switch (currentFormat) {
@@ -175,6 +175,7 @@ bool RadarFileReader::readBinData() {
         point.z = target.z_axes;
         point.rcs = target.peakVal;
         point.v_r = target.speed;
+        point.ana_snr = target.aoa_snr;
         radarData->points.push_back(point);
     }
 

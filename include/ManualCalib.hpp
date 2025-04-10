@@ -55,6 +55,15 @@ public:
         cv::Mat &image);
     // 坐标转换：图像坐标到雷达坐标
     cv::Point3f imageToRadar(const cv::Point2f &image_point, float depth);
+
+public:
+    // 获取参数
+    std::vector<cv::Mat> getCalibParam();
+
+public:
+    // 雷达到图像的映射操作通用函数
+    std::vector<cv::Point2f> radarToImage(const std::vector<cv::Point3f>& radar_point);
+    cv::Mat cubeBottomMapper(cv::Mat image, float x_min, float y_min, float z_min, float x_max, float y_max, float z_max, float z_real);
 };
 
 //==============================================================================
